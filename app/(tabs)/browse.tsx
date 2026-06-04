@@ -14,6 +14,7 @@ import {
 export default function BrowseScreen() {
     const [cards, setCards] = useState<DbCard[]>([]);
     const [editingCard, setEditingCard] = useState<DbCard | null>(null);
+    const [editCategory, setEditCategory] = useState('');
     const [editQuestion, setEditQuestion] = useState('');
     const [editAnswer, setEditAnswer] = useState('');
 
@@ -30,6 +31,7 @@ export default function BrowseScreen() {
 
     function openEdit(card: DbCard) {
         setEditingCard(card);
+        setEditCategory(card.category || 'General');
         setEditQuestion(card.question);
         setEditAnswer(card.answer);
     }
@@ -37,10 +39,18 @@ export default function BrowseScreen() {
     async function saveEdit() {
         if (!editingCard) return;
 
-        await updateCard(editingCard.id, editQuestion, editAnswer);
+        await updateCard(
+            editingCard.id,
+            editCategory.trim() || 'General',
+            editQuestion.trim(),
+            editAnswer.trim()
+        );
+
         setEditingCard(null);
+        setEditCategory('');
         setEditQuestion('');
         setEditAnswer('');
+
         await loadCards();
     }
 
@@ -67,6 +77,7 @@ export default function BrowseScreen() {
             ) : (
                 cards.map((card) => (
                     <View key={card.id} style={styles.cardBox}>
+                        <Text style={styles.category}>{card.category || 'General'}</Text>
                         <Text style={styles.question}>{card.question}</Text>
                         <Text style={styles.answer}>{card.answer}</Text>
 
@@ -87,6 +98,15 @@ export default function BrowseScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalBox}>
                         <Text style={styles.modalTitle}>Edit Card</Text>
+
+                        <Text style={styles.label}>Category</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={editCategory}
+                            onChangeText={setEditCategory}
+                            placeholder="Linux, Networking, THM..."
+                            placeholderTextColor="#9CA3AF"
+                        />
 
                         <Text style={styles.label}>Question</Text>
                         <TextInput
@@ -144,6 +164,13 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         marginBottom: 12,
     },
+    category: {
+        color: '#60A5FA',
+        fontSize: 14,
+        fontWeight: '700',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+    },
     question: {
         color: 'white',
         fontSize: 18,
@@ -172,6 +199,7 @@ const styles = StyleSheet.create({
     actionButtonText: {
         color: 'white',
         fontWeight: '600',
+        textAlign: 'center',
     },
     modalOverlay: {
         flex: 1,
@@ -183,7 +211,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#1F2937',
         borderRadius: 16,
         padding: 20,
-        alignItems: 'stretch',
     },
     modalTitle: {
         color: 'white',
@@ -222,4 +249,4 @@ const styles = StyleSheet.create({
         borderRadius: 10,
         alignItems: 'center',
     },
-});
+}); 

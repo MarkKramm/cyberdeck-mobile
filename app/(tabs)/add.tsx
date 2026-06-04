@@ -3,14 +3,41 @@ import { useState } from 'react';
 import { Alert, Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function AddScreen() {
+    const [category, setCategory] = useState('');
     const [question, setQuestion] = useState('');
     const [answer, setAnswer] = useState('');
+
+    async function handleSaveCard() {
+        if (!question.trim() || !answer.trim()) {
+            Alert.alert('Missing Info', 'Please add both a question and an answer.');
+            return;
+        }
+
+        await saveCard(category.trim() || 'General', question.trim(), answer.trim());
+
+        Keyboard.dismiss();
+
+        Alert.alert('Card Saved!', 'Your card was added to CyberDeck.');
+
+        setCategory('');
+        setQuestion('');
+        setAnswer('');
+    }
+
     return (
         <View style={styles.container}>
             <Text style={styles.title}>Add Card</Text>
 
-            <Text style={styles.label}>Question</Text>
+            <Text style={styles.label}>Category</Text>
+            <TextInput
+                style={styles.input}
+                placeholder="Linux, Networking, THM..."
+                placeholderTextColor="#9CA3AF"
+                value={category}
+                onChangeText={setCategory}
+            />
 
+            <Text style={styles.label}>Question</Text>
             <TextInput
                 style={styles.input}
                 placeholder="What is DNS?"
@@ -20,7 +47,6 @@ export default function AddScreen() {
             />
 
             <Text style={styles.label}>Answer</Text>
-
             <TextInput
                 style={[styles.input, styles.answerInput]}
                 placeholder="DNS translates names into IP addresses."
@@ -30,20 +56,8 @@ export default function AddScreen() {
                 onChangeText={setAnswer}
             />
 
-            <TouchableOpacity
-                style={styles.button}
-                onPress={() => {
-                    saveCard(question, answer);
-                    Keyboard.dismiss();
-                    Alert.alert('Card Saved!', 'Your card was added temporarily.');
-
-                    setQuestion('');
-                    setAnswer('');
-                }}>
-
-
+            <TouchableOpacity style={styles.button} onPress={handleSaveCard}>
                 <Text style={styles.buttonText}>Save Card</Text>
-
             </TouchableOpacity>
         </View>
     );
@@ -55,20 +69,17 @@ const styles = StyleSheet.create({
         backgroundColor: '#111827',
         padding: 24,
     },
-
     title: {
         fontSize: 32,
         fontWeight: 'bold',
         color: 'white',
         marginBottom: 30,
     },
-
     label: {
         color: 'white',
         marginBottom: 8,
         fontSize: 16,
     },
-
     input: {
         backgroundColor: '#1F2937',
         color: 'white',
@@ -76,22 +87,19 @@ const styles = StyleSheet.create({
         padding: 14,
         marginBottom: 20,
     },
-
     answerInput: {
         minHeight: 120,
         textAlignVertical: 'top',
     },
-
     button: {
         backgroundColor: '#2563EB',
         padding: 18,
         borderRadius: 12,
         marginTop: 10,
+        alignItems: 'center',
     },
-
     buttonText: {
         color: 'white',
-        textAlign: 'center',
         fontWeight: '600',
         fontSize: 18,
     },

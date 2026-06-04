@@ -24,17 +24,14 @@ export default function ReviewScreen() {
     const currentCard = cards[currentIndex];
 
     async function showNextCard() {
-        if (cards.length === 0) {
-            return;
-        }
+        if (!currentCard) return;
 
         await incrementReviewCount(currentCard.id);
 
         const updatedCards = await getAllCards();
         setCards(updatedCards);
 
-        const nextIndex = (currentIndex + 1) % cards.length;
-
+        const nextIndex = (currentIndex + 1) % updatedCards.length;
         setCurrentIndex(nextIndex);
         setShowAnswer(false);
     }
@@ -46,36 +43,34 @@ export default function ReviewScreen() {
             {cards.length === 0 ? (
                 <Text style={styles.subtitle}>No cards yet. Add a card first.</Text>
             ) : (
-                <View style={styles.cardBox}>
-                    <Text style={styles.counter}>
-                        Card {currentIndex + 1} of {cards.length}
-                    </Text>
+                <View style={styles.centerArea}>
+                    <View style={styles.cardBox}>
+                        <Text style={styles.counter}>
+                            Card {currentIndex + 1} of {cards.length}
+                        </Text>
 
-                    <Text style={styles.reviewCount}>
-                        Reviews: {currentCard.review_count ?? 0}
-                    </Text>
+                        <Text style={styles.reviewCount}>
+                            Reviews: {currentCard.review_count ?? 0}
+                        </Text>
 
-                    <Text style={styles.label}>Question</Text>
-                    <Text style={styles.question}>{currentCard.question}</Text>
+                        <Text style={styles.label}>Question</Text>
+                        <Text style={styles.question}>{currentCard.question}</Text>
 
-                    {showAnswer ? (
-                        <>
-                            <Text style={styles.label}>Answer</Text>
-                            <Text style={styles.answer}>{currentCard.answer}</Text>
+                        {showAnswer ? (
+                            <>
+                                <Text style={styles.label}>Answer</Text>
+                                <Text style={styles.answer}>{currentCard.answer}</Text>
 
-                            <TouchableOpacity
-                                style={styles.button}
-                                onPress={showNextCard}>
-                                <Text style={styles.buttonText}>Reviewed ✓</Text>
+                                <TouchableOpacity style={styles.button} onPress={showNextCard}>
+                                    <Text style={styles.buttonText}>Reviewed ✓</Text>
+                                </TouchableOpacity>
+                            </>
+                        ) : (
+                            <TouchableOpacity style={styles.button} onPress={() => setShowAnswer(true)}>
+                                <Text style={styles.buttonText}>Show Answer</Text>
                             </TouchableOpacity>
-                        </>
-                    ) : (
-                        <TouchableOpacity
-                            style={styles.button}
-                            onPress={() => setShowAnswer(true)}>
-                            <Text style={styles.buttonText}>Show Answer</Text>
-                        </TouchableOpacity>
-                    )}
+                        )}
+                    </View>
                 </View>
             )}
         </View>
@@ -98,6 +93,10 @@ const styles = StyleSheet.create({
     subtitle: {
         color: '#D1D5DB',
         fontSize: 18,
+    },
+    centerArea: {
+        flex: 1,
+        justifyContent: 'center',
     },
     cardBox: {
         backgroundColor: '#1F2937',
