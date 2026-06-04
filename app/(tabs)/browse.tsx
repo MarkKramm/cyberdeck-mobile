@@ -1,10 +1,21 @@
-import { DbCard, deleteCard, getAllCards } from '@/src/database';
+import { DbCard, deleteCard, getAllCards, updateCard } from '@/src/database';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+    Alert,
+    Modal,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from 'react-native';
 
 export default function BrowseScreen() {
     const [cards, setCards] = useState<DbCard[]>([]);
+    const [editingCard, setEditingCard] = useState<DbCard | null>(null);
+    const [editQuestion, setEditQuestion] = useState('');
+    const [editAnswer, setEditAnswer] = useState('');
 
     async function loadCards() {
         const savedCards = await getAllCards();
@@ -17,12 +28,25 @@ export default function BrowseScreen() {
         }, [])
     );
 
+    function openEdit(card: DbCard) {
+        setEditingCard(card);
+        setEditQuestion(card.question);
+        setEditAnswer(card.answer);
+    }
+
+    async function saveEdit() {
+        if (!editingCard) return;
+
+        await updateCard(editingCard.id, editQuestion, editAnswer);
+        setEditingCard(null);
+        setEditQuestion('');
+        setEditAnswer('');
+        await loadCards();
+    }
+
     function confirmDelete(cardId: number) {
         Alert.alert('Delete Card?', 'This will remove the card from CyberDeck.', [
-            {
-                text: 'Cancel',
-                style: 'cancel',
-            },
+            { text: 'Cancel', style: 'cancel' },
             {
                 text: 'Delete',
                 style: 'destructive',
@@ -46,14 +70,53 @@ export default function BrowseScreen() {
                         <Text style={styles.question}>{card.question}</Text>
                         <Text style={styles.answer}>{card.answer}</Text>
 
-                        <TouchableOpacity
-                            style={styles.deleteButton}
-                            onPress={() => confirmDelete(card.id)}>
-                            <Text style={styles.deleteButtonText}>Delete</Text>
-                        </TouchableOpacity>
+                        <View style={styles.actionRow}>
+                            <TouchableOpacity style={styles.editButton} onPress={() => openEdit(card)}>
+                                <Text style={styles.actionButtonText}>Edit</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity style={styles.deleteButton} onPress={() => confirmDelete(card.id)}>
+                                <Text style={styles.actionButtonText}>Delete</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 ))
             )}
+
+            <Modal visible={editingCard !== null} transparent animationType="slide">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalBox}>
+                        <Text style={styles.modalTitle}>Edit Card</Text>
+
+                        <Text style={styles.label}>Question</Text>
+                        <TextInput
+                            style={styles.input}
+                            value={editQuestion}
+                            onChangeText={setEditQuestion}
+                            placeholder="Question"
+                            placeholderTextColor="#9CA3AF"
+                        />
+
+                        <Text style={styles.label}>Answer</Text>
+                        <TextInput
+                            style={[styles.input, styles.answerInput]}
+                            value={editAnswer}
+                            onChangeText={setEditAnswer}
+                            placeholder="Answer"
+                            placeholderTextColor="#9CA3AF"
+                            multiline
+                        />
+
+                        <TouchableOpacity style={styles.saveButton} onPress={saveEdit}>
+                            <Text style={styles.actionButtonText}>Save Changes</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.cancelButton} onPress={() => setEditingCard(null)}>
+                            <Text style={styles.actionButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -92,14 +155,71 @@ const styles = StyleSheet.create({
         fontSize: 16,
         marginBottom: 12,
     },
+    actionRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    editButton: {
+        backgroundColor: '#2563EB',
+        padding: 10,
+        borderRadius: 8,
+    },
     deleteButton: {
         backgroundColor: '#7F1D1D',
         padding: 10,
         borderRadius: 8,
-        alignSelf: 'flex-start',
     },
-    deleteButtonText: {
+    actionButtonText: {
         color: 'white',
         fontWeight: '600',
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        justifyContent: 'center',
+        padding: 24,
+    },
+    modalBox: {
+        backgroundColor: '#1F2937',
+        borderRadius: 16,
+        padding: 20,
+        alignItems: 'stretch',
+    },
+    modalTitle: {
+        color: 'white',
+        fontSize: 26,
+        fontWeight: 'bold',
+        marginBottom: 20,
+    },
+    label: {
+        color: 'white',
+        marginBottom: 8,
+        fontSize: 16,
+    },
+    input: {
+        backgroundColor: '#111827',
+        color: 'white',
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 16,
+    },
+    answerInput: {
+        minHeight: 100,
+        textAlignVertical: 'top',
+    },
+    saveButton: {
+        backgroundColor: '#2563EB',
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 10,
+        marginBottom: 10,
+        alignItems: 'center',
+    },
+    cancelButton: {
+        backgroundColor: '#374151',
+        paddingVertical: 14,
+        paddingHorizontal: 24,
+        borderRadius: 10,
+        alignItems: 'center',
     },
 });
