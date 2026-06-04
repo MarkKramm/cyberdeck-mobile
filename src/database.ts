@@ -18,13 +18,13 @@ export async function initializeDatabase() {
 
     await db.execAsync(`
     CREATE TABLE IF NOT EXISTS cards (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        question TEXT NOT NULL,
-        answer TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        review_count INTEGER DEFAULT 0
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      review_count INTEGER DEFAULT 0
     );
-`);
+  `);
 
     await addReviewColumn();
 
@@ -38,12 +38,10 @@ export async function addReviewColumn() {
 
     try {
         await db.execAsync(`
-        ALTER TABLE cards
-        ADD COLUMN review_count INTEGER DEFAULT 0;
+      ALTER TABLE cards
+      ADD COLUMN review_count INTEGER DEFAULT 0;
     `);
-    } catch {
-        // Column already exists, so we ignore this.
-    }
+    } catch { }
 }
 
 export async function saveCard(question: string, answer: string) {
@@ -59,11 +57,9 @@ export async function saveCard(question: string, answer: string) {
 export async function getAllCards() {
     const db = await openDatabase();
 
-    const result = await db.getAllAsync<DbCard>(
+    return await db.getAllAsync<DbCard>(
         'SELECT * FROM cards ORDER BY created_at DESC;'
     );
-
-    return result;
 }
 
 export async function updateCard(id: number, question: string, answer: string) {
@@ -78,7 +74,10 @@ export async function updateCard(id: number, question: string, answer: string) {
 export async function deleteCard(id: number) {
     const db = await openDatabase();
 
-    await db.runAsync('DELETE FROM cards WHERE id = ?;', [id]);
+    await db.runAsync(
+        'DELETE FROM cards WHERE id = ?;',
+        [id]
+    );
 }
 
 export async function getCardCount() {
@@ -91,15 +90,25 @@ export async function getCardCount() {
     return result?.count ?? 0;
 }
 
+export async function getTotalReviews() {
+    const db = await openDatabase();
+
+    const result = await db.getFirstAsync<{ total: number }>(
+        'SELECT SUM(review_count) as total FROM cards;'
+    );
+
+    return result?.total ?? 0;
+}
+
 export async function incrementReviewCount(id: number) {
     const db = await openDatabase();
 
     await db.runAsync(
         `
-        UPDATE cards
-        SET review_count = COALESCE(review_count, 0) + 1
-        WHERE id = ?;
+      UPDATE cards
+      SET review_count = COALESCE(review_count, 0) + 1
+      WHERE id = ?;
     `,
         [id]
     );
-}
+}                 
