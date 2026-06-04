@@ -1,4 +1,4 @@
-import { addCard } from '@/src/cardStore';
+import { saveCard } from '@/src/database';
 import { useState } from 'react';
 import { Alert, Keyboard, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -33,7 +33,7 @@ export default function AddScreen() {
             <TouchableOpacity
                 style={styles.button}
                 onPress={() => {
-                    addCard(question, answer);
+                    saveCard(question, answer);
                     Keyboard.dismiss();
                     Alert.alert('Card Saved!', 'Your card was added temporarily.');
 
