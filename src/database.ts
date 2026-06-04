@@ -85,6 +85,42 @@ export async function getAllCards() {
   `);
 }
 
+export async function getCardsByCategory(category: string) {
+  const db = await getReadyDatabase();
+
+  if (category === 'All') {
+    return getAllCards();
+  }
+
+  return await db.getAllAsync<DbCard>(
+    `
+      SELECT
+        id,
+        COALESCE(category, 'General') as category,
+        question,
+        answer,
+        created_at,
+        COALESCE(review_count, 0) as review_count
+      FROM cards
+      WHERE COALESCE(category, 'General') = ?
+      ORDER BY created_at DESC;
+    `,
+    [category]
+  );
+}
+
+export async function getCategories() {
+  const db = await getReadyDatabase();
+
+  const rows = await db.getAllAsync<{ category: string }>(`
+    SELECT DISTINCT COALESCE(category, 'General') as category
+    FROM cards
+    ORDER BY category ASC;
+  `);
+
+  return ['All', ...rows.map((row) => row.category)];
+}
+
 export async function updateCard(
   id: number,
   category: string,
