@@ -1,21 +1,38 @@
-import { DbCard, getAllCards } from '@/src/database';
+import { DbCard, deleteCard, getAllCards } from '@/src/database';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function BrowseScreen() {
     const [cards, setCards] = useState<DbCard[]>([]);
 
+    async function loadCards() {
+        const savedCards = await getAllCards();
+        setCards(savedCards);
+    }
+
     useFocusEffect(
         useCallback(() => {
-            async function loadCards() {
-                const savedCards = await getAllCards();
-                setCards(savedCards);
-            }
-
             loadCards();
         }, [])
     );
+
+    function confirmDelete(cardId: number) {
+        Alert.alert('Delete Card?', 'This will remove the card from CyberDeck.', [
+            {
+                text: 'Cancel',
+                style: 'cancel',
+            },
+            {
+                text: 'Delete',
+                style: 'destructive',
+                onPress: async () => {
+                    await deleteCard(cardId);
+                    await loadCards();
+                },
+            },
+        ]);
+    }
 
     return (
         <View style={styles.container}>
@@ -28,6 +45,12 @@ export default function BrowseScreen() {
                     <View key={card.id} style={styles.cardBox}>
                         <Text style={styles.question}>{card.question}</Text>
                         <Text style={styles.answer}>{card.answer}</Text>
+
+                        <TouchableOpacity
+                            style={styles.deleteButton}
+                            onPress={() => confirmDelete(card.id)}>
+                            <Text style={styles.deleteButtonText}>Delete</Text>
+                        </TouchableOpacity>
                     </View>
                 ))
             )}
@@ -67,5 +90,16 @@ const styles = StyleSheet.create({
     answer: {
         color: '#D1D5DB',
         fontSize: 16,
+        marginBottom: 12,
+    },
+    deleteButton: {
+        backgroundColor: '#7F1D1D',
+        padding: 10,
+        borderRadius: 8,
+        alignSelf: 'flex-start',
+    },
+    deleteButtonText: {
+        color: 'white',
+        fontWeight: '600',
     },
 });

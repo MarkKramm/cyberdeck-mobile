@@ -48,3 +48,12 @@ export async function getAllCards() {
 
     return result;
 }
+
+export async function deleteCard(id: number) {
+    const db = await openDatabase();
+
+    await db.runAsync(
+        'DELETE FROM cards WHERE id = ?;',
+        [id]
+    );
+}
