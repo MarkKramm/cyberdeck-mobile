@@ -1,4 +1,4 @@
-import { DbCard, getAllCards } from '@/src/database';
+import { DbCard, getAllCards, incrementReviewCount } from '@/src/database';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -23,12 +23,18 @@ export default function ReviewScreen() {
 
     const currentCard = cards[currentIndex];
 
-    function showNextCard() {
+    async function showNextCard() {
         if (cards.length === 0) {
             return;
         }
 
+        await incrementReviewCount(currentCard.id);
+
+        const updatedCards = await getAllCards();
+        setCards(updatedCards);
+
         const nextIndex = (currentIndex + 1) % cards.length;
+
         setCurrentIndex(nextIndex);
         setShowAnswer(false);
     }
@@ -45,6 +51,10 @@ export default function ReviewScreen() {
                         Card {currentIndex + 1} of {cards.length}
                     </Text>
 
+                    <Text style={styles.reviewCount}>
+                        Reviews: {currentCard.review_count ?? 0}
+                    </Text>
+
                     <Text style={styles.label}>Question</Text>
                     <Text style={styles.question}>{currentCard.question}</Text>
 
@@ -53,12 +63,16 @@ export default function ReviewScreen() {
                             <Text style={styles.label}>Answer</Text>
                             <Text style={styles.answer}>{currentCard.answer}</Text>
 
-                            <TouchableOpacity style={styles.button} onPress={showNextCard}>
-                                <Text style={styles.buttonText}>Next Card</Text>
+                            <TouchableOpacity
+                                style={styles.button}
+                                onPress={showNextCard}>
+                                <Text style={styles.buttonText}>Reviewed ✓</Text>
                             </TouchableOpacity>
                         </>
                     ) : (
-                        <TouchableOpacity style={styles.button} onPress={() => setShowAnswer(true)}>
+                        <TouchableOpacity
+                            style={styles.button}
+                            onPress={() => setShowAnswer(true)}>
                             <Text style={styles.buttonText}>Show Answer</Text>
                         </TouchableOpacity>
                     )}
@@ -92,8 +106,14 @@ const styles = StyleSheet.create({
     },
     counter: {
         color: '#9CA3AF',
-        marginBottom: 18,
+        marginBottom: 8,
         fontSize: 14,
+    },
+    reviewCount: {
+        color: '#10B981',
+        marginBottom: 16,
+        fontSize: 14,
+        fontWeight: '600',
     },
     label: {
         color: '#60A5FA',
@@ -117,10 +137,10 @@ const styles = StyleSheet.create({
         padding: 16,
         borderRadius: 12,
         marginTop: 10,
+        alignItems: 'center',
     },
     buttonText: {
         color: 'white',
-        textAlign: 'center',
         fontWeight: '600',
         fontSize: 18,
     },

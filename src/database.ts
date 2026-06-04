@@ -5,6 +5,7 @@ export type DbCard = {
     question: string;
     answer: string;
     created_at: string;
+    review_count: number;
 };
 
 export async function openDatabase() {
@@ -17,16 +18,32 @@ export async function initializeDatabase() {
 
     await db.execAsync(`
     CREATE TABLE IF NOT EXISTS cards (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      question TEXT NOT NULL,
-      answer TEXT NOT NULL,
-      created_at TEXT NOT NULL
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        review_count INTEGER DEFAULT 0
     );
-  `);
+`);
+
+    await addReviewColumn();
 
     console.log('Database initialized');
 
     return db;
+}
+
+export async function addReviewColumn() {
+    const db = await openDatabase();
+
+    try {
+        await db.execAsync(`
+        ALTER TABLE cards
+        ADD COLUMN review_count INTEGER DEFAULT 0;
+    `);
+    } catch {
+        // Column already exists, so we ignore this.
+    }
 }
 
 export async function saveCard(question: string, answer: string) {
@@ -34,8 +51,8 @@ export async function saveCard(question: string, answer: string) {
     const now = new Date().toISOString();
 
     await db.runAsync(
-        'INSERT INTO cards (question, answer, created_at) VALUES (?, ?, ?);',
-        [question, answer, now]
+        'INSERT INTO cards (question, answer, created_at, review_count) VALUES (?, ?, ?, ?);',
+        [question, answer, now, 0]
     );
 }
 
@@ -72,4 +89,17 @@ export async function getCardCount() {
     );
 
     return result?.count ?? 0;
+}
+
+export async function incrementReviewCount(id: number) {
+    const db = await openDatabase();
+
+    await db.runAsync(
+        `
+        UPDATE cards
+        SET review_count = COALESCE(review_count, 0) + 1
+        WHERE id = ?;
+    `,
+        [id]
+    );
 }
