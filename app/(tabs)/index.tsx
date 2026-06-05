@@ -8,11 +8,17 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      let active = true;
       async function loadStats() {
         const currentStats = await getHomeSummaryStats();
-        setStats(currentStats);
+        if (active) {
+          setStats(currentStats);
+        }
       }
       loadStats();
+      return () => {
+        active = false;
+      };
     }, [])
   );
 

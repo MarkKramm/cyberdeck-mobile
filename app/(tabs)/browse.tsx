@@ -1,4 +1,4 @@
-import { DbCard, DbDeck, deleteCard, getAllCards, getAllDecks, updateCard } from '@/src/database';
+import { DbCard, DbDeck, deleteCard, getAllCards, getAllDecks, openDatabase, updateCard } from '@/src/database';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -30,7 +30,7 @@ export default function BrowseScreen() {
   const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
   const [searchText, setSearchText] = useState('');
 
-  // Editing state management fields
+  // Editing modal form bindings
   const [editingCard, setEditingCard] = useState<DbCard | null>(null);
   const [editDeckId, setEditDeckId] = useState<number>(0);
   const [editCardType, setEditCardType] = useState('Definition');
@@ -47,8 +47,7 @@ export default function BrowseScreen() {
     setCards(savedCards);
     setDecks(savedDecks);
 
-    // Keep the active filter target safe if its corresponding items change
-    if (selectedDeckId && !savedDecks.some(d => d.id === selectedDeckId)) {
+    if (selectedDeckId !== null && !savedDecks.some(d => d.id === selectedDeckId)) {
       setSelectedDeckId(null);
     }
   }
@@ -59,7 +58,6 @@ export default function BrowseScreen() {
     }, [selectedDeckId])
   );
 
-  // Dynamic search calculation index
   const searchedCards = useMemo(() => {
     const cleanSearch = searchText.trim().toLowerCase();
     if (!cleanSearch) return cards;
@@ -81,7 +79,6 @@ export default function BrowseScreen() {
     });
   }, [cards, searchText]);
 
-  // Group cards explicitly by Deck ID references instead of raw string paths
   const groupedCards = useMemo(() => {
     return cards.reduce((groups, card) => {
       const dId = card.deck_id;
@@ -132,7 +129,7 @@ export default function BrowseScreen() {
   }
 
   function confirmDelete(cardId: number) {
-    Alert.alert('Destroy Card?', 'This will permanently delete this record from your local storage framework.', [
+    Alert.alert('Destroy Card?', 'This will permanently delete this record from storage.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -143,6 +140,27 @@ export default function BrowseScreen() {
         },
       },
     ]);
+  }
+
+  function confirmDeleteDeck(deckId: number, deckName: string) {
+    Alert.alert(
+      'Destroy Entire Deck?', 
+      `Are you sure you want to delete "${deckName}"? This will permanently wipe out the deck AND all cards stored inside it!`, 
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Wipe Deck',
+          style: 'destructive',
+          onPress: async () => {
+            const db = await openDatabase();
+            await db.runAsync('DELETE FROM decks WHERE id = ?;', [deckId]);
+            setSelectedDeckId(null);
+            await loadData();
+            Alert.alert('Purged', 'Deck records completely removed.');
+          },
+        },
+      ]
+    );
   }
 
   function renderCard(card: DbCard) {
@@ -161,7 +179,6 @@ export default function BrowseScreen() {
           <TouchableOpacity style={styles.editButton} onPress={() => openEdit(card)}>
             <Text style={styles.actionButtonText}>Edit</Text>
           </TouchableOpacity>
-
           <TouchableOpacity style={styles.deleteButton} onPress={() => confirmDelete(card.id)}>
             <Text style={styles.actionButtonText}>Delete</Text>
           </TouchableOpacity>
@@ -202,17 +219,16 @@ export default function BrowseScreen() {
           </TouchableOpacity>
         )}
 
-        {cards.length === 0 ? (
+        {cards.length === 0 && decks.length === 0 ? (
           <View style={styles.emptyBox}>
             <Text style={styles.subtitle}>Vault Empty</Text>
-            <Text style={styles.emptyHint}>No cards initialized yet. Populate your study track first.</Text>
+            <Text style={styles.emptyHint}>No categories initialized yet.</Text>
           </View>
         ) : isSearching ? (
           <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
             {searchedCards.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Text style={styles.subtitle}>No matching artifacts</Text>
-                <Text style={styles.emptyHint}>Refine your search term.</Text>
               </View>
             ) : (
               searchedCards.map(renderCard)
@@ -229,7 +245,7 @@ export default function BrowseScreen() {
                   onPress={() => setSelectedDeckId(deck.id)}
                 >
                   <Text style={styles.folderTitle}>📁 {deck.name}</Text>
-                  <Text style={styles.folderDescription}>{deck.description}</Text>
+                  {deck.description ? <Text style={styles.folderDescription}>{deck.description}</Text> : null}
                   <Text style={styles.folderCount}>{count} concept card(s)</Text>
                 </TouchableOpacity>
               );
@@ -237,15 +253,21 @@ export default function BrowseScreen() {
           </ScrollView>
         ) : (
           <>
-            <TouchableOpacity style={styles.backButton} onPress={() => setSelectedDeckId(null)}>
-              <Text style={styles.backButtonText}>← Return to Vault Folders</Text>
-            </TouchableOpacity>
+            <View style={styles.deckControlHeaderRow}>
+              <TouchableOpacity style={styles.backButton} onPress={() => setSelectedDeckId(null)}>
+                <Text style={styles.backButtonText}>← Return</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.deleteDeckActionButton} onPress={() => confirmDeleteDeck(selectedDeckObj!.id, selectedDeckObj!.name)}>
+                <Text style={styles.deleteDeckActionText}>🗑 Delete Deck</Text>
+              </TouchableOpacity>
+            </View>
 
             <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
               {visibleCards.length === 0 ? (
                 <View style={styles.emptyBox}>
                   <Text style={styles.subtitle}>No contents</Text>
-                  <Text style={styles.emptyHint}>No items added to this cybersecurity profile yet.</Text>
+                  <Text style={styles.emptyHint}>No items added to this profile yet.</Text>
                 </View>
               ) : (
                 visibleCards.map(renderCard)
@@ -255,7 +277,6 @@ export default function BrowseScreen() {
         )}
       </View>
 
-      {/* RE-ENGINEERED COMPREHENSIVE RE-ALIGNED FORM MODAL */}
       <Modal visible={editingCard !== null} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <ScrollView style={styles.modalScrollBox}>
@@ -292,41 +313,20 @@ export default function BrowseScreen() {
               </ScrollView>
 
               <Text style={styles.label}>Front (Concept)</Text>
-              <TextInput
-                style={styles.input}
-                value={editFront}
-                onChangeText={setEditFront}
-                multiline
-              />
+              <TextInput style={styles.input} value={editFront} onChangeText={setEditFront} multiline />
 
               <Text style={styles.label}>Back (Logic Engine)</Text>
-              <TextInput
-                style={[styles.input, styles.answerInput]}
-                value={editBack}
-                onChangeText={setEditBack}
-                multiline
-              />
+              <TextInput style={[styles.input, styles.answerInput]} value={editBack} onChangeText={setEditBack} multiline />
 
               <Text style={styles.label}>Metadata Tags</Text>
-              <TextInput
-                style={styles.input}
-                value={editTags}
-                onChangeText={setEditTags}
-                autoCapitalize="none"
-              />
+              <TextInput style={styles.input} value={editTags} onChangeText={setEditTags} autoCapitalize="none" />
 
               <Text style={styles.label}>Context Reference Notes</Text>
-              <TextInput
-                style={styles.input}
-                value={editNotes}
-                onChangeText={setEditNotes}
-                multiline
-              />
+              <TextInput style={styles.input} value={editNotes} onChangeText={setEditNotes} multiline />
 
               <TouchableOpacity style={styles.saveButton} onPress={saveEdit}>
                 <Text style={styles.actionButtonText}>Save Changes</Text>
               </TouchableOpacity>
-
               <TouchableOpacity style={styles.cancelButton} onPress={() => setEditingCard(null)}>
                 <Text style={styles.actionButtonText}>Cancel</Text>
               </TouchableOpacity>
@@ -342,244 +342,49 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#111827',
-    padding: 24,
-    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingTop: 64, // Pushes header down away from the status bar
   },
-  contentBox: {
-    width: '100%',
-    maxHeight: '100%',
-  },
-  title: {
-    fontSize: 34,
-    fontWeight: 'bold',
-    color: 'white',
-    textAlign: 'center',
-    marginBottom: 18,
-  },
-  searchInput: {
-    backgroundColor: '#1F2937',
-    color: 'white',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  clearSearchButton: {
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  clearSearchText: {
-    color: '#3B82F6',
-    fontWeight: '600',
-  },
-  scrollArea: {
-    width: '100%',
-  },
-  folderBox: {
-    backgroundColor: '#1F2937',
-    padding: 18,
-    borderRadius: 16,
-    marginBottom: 12,
-    borderLeftWidth: 6,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  folderTitle: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  folderDescription: {
-    color: '#9CA3AF',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  folderCount: {
-    color: '#6B7280',
-    marginTop: 10,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  emptyBox: {
-    backgroundColor: '#1F2937',
-    padding: 24,
-    borderRadius: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  subtitle: {
-    color: 'white',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  emptyHint: {
-    color: '#9CA3AF',
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  backButton: {
-    marginBottom: 16,
-    alignItems: 'center',
-  },
-  backButtonText: {
-    color: '#3B82F6',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  cardBox: {
-    backgroundColor: '#1F2937',
-    padding: 16,
-    borderRadius: 14,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  categoryLabel: {
-    color: '#60A5FA',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  typeBadge: {
-    backgroundColor: '#374151',
-    color: '#F3F4F6',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  question: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 8,
-  },
-  answer: {
-    color: '#D1D5DB',
-    fontSize: 15,
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  tagsLabel: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  notesLabel: {
-    color: '#6B7280',
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginBottom: 12,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  editButton: {
-    backgroundColor: '#1F2937',
-    padding: 10,
-    borderRadius: 8,
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#4B5563',
-  },
-  deleteButton: {
-    backgroundColor: '#7F1D1D',
-    padding: 10,
-    borderRadius: 8,
-    flex: 1,
-  },
-  actionButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  modalScrollBox: {
-    marginVertical: 32,
-  },
-  modalBox: {
-    backgroundColor: '#1F2937',
-    borderRadius: 20,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  modalTitle: {
-    color: 'white',
-    fontSize: 26,
-    fontWeight: 'bold',
-    marginBottom: 20,
-    textAlign: 'center',
-  },
-  label: {
-    color: '#9CA3AF',
-    marginBottom: 8,
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
-  horizontalSelectorRow: {
-    marginBottom: 16,
-    flexDirection: 'row',
-  },
-  selectorOptionButton: {
-    backgroundColor: '#111827',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    marginRight: 6,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  activeTypeOptionButton: {
-    backgroundColor: '#2563EB',
-    borderColor: '#3B82F6',
-  },
-  selectorOptionButtonText: {
-    color: 'white',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  input: {
-    backgroundColor: '#111827',
-    color: 'white',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  answerInput: {
-    minHeight: 80,
-    textAlignVertical: 'top',
-  },
-  saveButton: {
-    backgroundColor: '#2563EB',
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginBottom: 10,
-    alignItems: 'center',
-  },
-  cancelButton: {
-    backgroundColor: '#374151',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
+  contentBox: { width: '100%', maxHeight: '100%' },
+  title: { fontSize: 34, fontWeight: 'bold', color: 'white', textAlign: 'center', marginBottom: 18 },
+  searchInput: { backgroundColor: '#1F2937', color: 'white', borderRadius: 14, padding: 14, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#374151' },
+  clearSearchButton: { alignItems: 'center', marginBottom: 12 },
+  clearSearchText: { color: '#3B82F6', fontWeight: '600' },
+  scrollArea: { width: '100%', marginBottom: 80 },
+  folderBox: { backgroundColor: '#1F2937', padding: 18, borderRadius: 16, marginBottom: 12, borderLeftWidth: 6, borderWidth: 1, borderColor: '#374151' },
+  folderTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
+  folderDescription: { color: '#9CA3AF', fontSize: 13, marginTop: 4 },
+  folderCount: { color: '#6B7280', marginTop: 10, fontSize: 12, fontWeight: '600' },
+  emptyBox: { backgroundColor: '#1F2937', padding: 24, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#374151' },
+  subtitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
+  emptyHint: { color: '#9CA3AF', marginTop: 8, textAlign: 'center' },
+  deckControlHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  backButton: { paddingVertical: 6, paddingHorizontal: 12 },
+  backButtonText: { color: '#3B82F6', fontSize: 16, fontWeight: '600' },
+  deleteDeckActionButton: { backgroundColor: '#7F1D1D', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
+  deleteDeckActionText: { color: '#FCA5A5', fontSize: 12, fontWeight: '700' },
+  cardBox: { backgroundColor: '#1F2937', padding: 16, borderRadius: 14, marginBottom: 12, borderWidth: 1, borderColor: '#374151' },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  categoryLabel: { color: '#60A5FA', fontSize: 13, fontWeight: '700' },
+  typeBadge: { backgroundColor: '#374151', color: '#F3F4F6', paddingVertical: 3, paddingHorizontal: 8, borderRadius: 6, fontSize: 11, fontWeight: '700' },
+  question: { color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  answer: { color: '#D1D5DB', fontSize: 15, marginBottom: 12, lineHeight: 20 },
+  tagsLabel: { color: '#9CA3AF', fontSize: 12, marginBottom: 4 },
+  notesLabel: { color: '#6B7280', fontSize: 12, fontStyle: 'italic', marginBottom: 12 },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  editButton: { backgroundColor: '#1F2937', padding: 10, borderRadius: 8, flex: 1, borderWidth: 1, borderColor: '#4B5563' },
+  deleteButton: { backgroundColor: '#7F1D1D', padding: 10, borderRadius: 8, flex: 1 },
+  actionButtonText: { color: 'white', fontWeight: '600', textAlign: 'center' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.8)', justifyContent: 'center', padding: 24 },
+  modalScrollBox: { marginVertical: 32 },
+  modalBox: { backgroundColor: '#1F2937', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#374151' },
+  modalTitle: { color: 'white', fontSize: 26, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+  horizontalSelectorRow: { marginBottom: 16, flexDirection: 'row' },
+  selectorOptionButton: { backgroundColor: '#111827', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, marginRight: 6, borderWidth: 1, borderColor: '#374151' },
+  activeTypeOptionButton: { backgroundColor: '#2563EB', borderColor: '#3B82F6' },
+  selectorOptionButtonText: { color: 'white', fontSize: 13, fontWeight: '600' },
+  input: { backgroundColor: '#111827', color: 'white', borderRadius: 12, padding: 12, marginBottom: 16, fontSize: 15, borderWidth: 1, borderColor: '#374151' },
+  answerInput: { minHeight: 80, textAlignVertical: 'top' },
+  saveButton: { backgroundColor: '#2563EB', paddingVertical: 14, borderRadius: 12, marginBottom: 10, alignItems: 'center' },
+  cancelButton: { backgroundColor: '#374151', paddingVertical: 14, borderRadius: 12, alignItems: 'center' },
 });

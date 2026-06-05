@@ -1,9 +1,10 @@
-import { getAllDecks, saveCard } from '@/src/database';
+import { createDeck, getAllDecks, saveCard } from '@/src/database';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
     Alert,
     Keyboard,
+    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -24,6 +25,8 @@ const CARD_TYPES = [
     'Interview'
 ];
 
+const DECK_COLORS = ['#2563EB', '#10B981', '#EF4444', '#F59E0B', '#8B5CF6', '#EC4899', '#6B7280'];
+
 export default function AddScreen() {
     const [decks, setDecks] = useState<any[]>([]);
     const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
@@ -34,25 +37,72 @@ export default function AddScreen() {
     const [tags, setTags] = useState('');
     const [notes, setNotes] = useState('');
 
+    // Custom deck creation modal states
+    const [isModalVisible, setIsModalVisible] = useState(false);
+    const [newDeckName, setNewDeckName] = useState('');
+    const [newDeckDesc, setNewDeckDesc] = useState('');
+    const [newDeckColor, setNewDeckColor] = useState('#2563EB');
+
+    const loadDecks = useCallback(async (autoSelectId?: number) => {
+        try {
+            const dbDecks = await getAllDecks();
+            setDecks(dbDecks);
+
+            if (autoSelectId) {
+                setSelectedDeckId(autoSelectId);
+            } else if (dbDecks.length > 0 && !selectedDeckId) {
+                setSelectedDeckId(dbDecks[0].id);
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }, [selectedDeckId]);
+
     useFocusEffect(
         useCallback(() => {
-            async function loadDecks() {
-                const dbDecks = await getAllDecks();
-                setDecks(dbDecks);
-
-                // Explicitly fallback select the first auto-seeded deck if none selected yet
-                if (dbDecks.length > 0) {
-                    setSelectedDeckId(dbDecks[0].id);
-                }
-            }
             loadDecks();
-        }, [])
+        }, [loadDecks])
     );
 
+    async function handleCreateCustomDeck() {
+        if (!newDeckName.trim()) {
+            Alert.alert('Missing Name', 'Please give your custom deck a title.');
+            return;
+        }
+
+        try {
+            // Force unique constraint check safely
+            const currentDecks = await getAllDecks();
+            if (currentDecks.some(d => d.name.toLowerCase() === newDeckName.trim().toLowerCase())) {
+                Alert.alert('Naming Conflict', 'A deck with that title already exists in your vault.');
+                return;
+            }
+
+            await createDeck(newDeckName.trim(), newDeckDesc.trim(), newDeckColor);
+
+            const updatedDecks = await getAllDecks();
+            const newlyCreated = updatedDecks.find(d => d.name.toLowerCase() === newDeckName.trim().toLowerCase());
+
+            setNewDeckName('');
+            setNewDeckDesc('');
+            setIsModalVisible(false);
+
+            if (newlyCreated) {
+                setSelectedDeckId(newlyCreated.id);
+                setDecks(updatedDecks);
+            } else {
+                await loadDecks();
+            }
+
+            Alert.alert('Deck Forged ✓', 'Your custom category is live.');
+        } catch (error) {
+            Alert.alert('System Error', 'Could not register custom deck layout.');
+        }
+    }
+
     async function handleSaveCard() {
-        // 1. Explicit protection checkpoint check
         if (selectedDeckId === null || selectedDeckId === undefined) {
-            Alert.alert('System Initializing', 'Decks are still spinning up. Please wait a millisecond and try again.');
+            Alert.alert('System Missing Deck', 'Please select or create a deck first.');
             return;
         }
 
@@ -62,7 +112,6 @@ export default function AddScreen() {
         }
 
         try {
-            // 2. Strict type passing to bypass accidental constraints failures
             await saveCard(
                 Number(selectedDeckId),
                 selectedType,
@@ -75,14 +124,13 @@ export default function AddScreen() {
             Keyboard.dismiss();
             Alert.alert('Success', 'Card secured into your CyberVault.');
 
-            // Clear layout fields cleanly
             setFront('');
             setBack('');
             setTags('');
             setNotes('');
         } catch (error) {
-            console.error('Save Failure Stack:', error);
-            Alert.alert('Database Error', 'Could not link card to target deck constraint.');
+            console.error(error);
+            Alert.alert('Database Error', 'Could not save card properties.');
         }
     }
 
@@ -91,7 +139,13 @@ export default function AddScreen() {
             <View style={styles.formBox}>
                 <Text style={styles.title}>Forge Card</Text>
 
-                <Text style={styles.label}>Target Deck</Text>
+                <View style={styles.headerLabelRow}>
+                    <Text style={styles.label}>Target Deck</Text>
+                    <TouchableOpacity style={styles.plusTriggerButton} onPress={() => setIsModalVisible(true)}>
+                        <Text style={styles.plusTriggerText}>➕ Custom Deck</Text>
+                    </TouchableOpacity>
+                </View>
+
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
                     {decks.map((deck) => (
                         <TouchableOpacity
@@ -126,7 +180,7 @@ export default function AddScreen() {
                 <Text style={styles.label}>Front (Question / Concept)</Text>
                 <TextInput
                     style={styles.input}
-                    placeholder="e.g., What command shows current folder path?"
+                    placeholder="Enter concept query..."
                     placeholderTextColor="#6B7280"
                     value={front}
                     onChangeText={setFront}
@@ -136,7 +190,7 @@ export default function AddScreen() {
                 <Text style={styles.label}>Back (Answer / Core Logic)</Text>
                 <TextInput
                     style={[styles.input, styles.answerInput]}
-                    placeholder="e.g., pwd (print working directory)"
+                    placeholder="Enter explanatory answer logic..."
                     placeholderTextColor="#6B7280"
                     multiline
                     value={back}
@@ -146,7 +200,7 @@ export default function AddScreen() {
                 <Text style={styles.label}>Tags (Comma separated)</Text>
                 <TextInput
                     style={styles.input}
-                    placeholder="linux, commands, basics"
+                    placeholder="e.g., flashcard, notes"
                     placeholderTextColor="#6B7280"
                     value={tags}
                     onChangeText={setTags}
@@ -156,7 +210,7 @@ export default function AddScreen() {
                 <Text style={styles.label}>Context Notes (Optional)</Text>
                 <TextInput
                     style={styles.input}
-                    placeholder="Use this when feeling lost in the file system tree."
+                    placeholder="Enter optional hint context rules..."
                     placeholderTextColor="#6B7280"
                     value={notes}
                     onChangeText={setNotes}
@@ -167,84 +221,81 @@ export default function AddScreen() {
                     <Text style={styles.buttonText}>Save Card</Text>
                 </TouchableOpacity>
             </View>
+
+            <Modal visible={isModalVisible} transparent animationType="slide">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalBox}>
+                        <Text style={styles.modalTitle}>Create Custom Deck</Text>
+
+                        <Text style={styles.modalLabel}>Deck Name</Text>
+                        <TextInput
+                            style={styles.modalInput}
+                            placeholder="e.g., Spanish Vocab, Medical Terms"
+                            placeholderTextColor="#6B7280"
+                            value={newDeckName}
+                            onChangeText={setNewDeckName}
+                        />
+
+                        <Text style={styles.modalLabel}>Description (Optional)</Text>
+                        <TextInput
+                            style={styles.modalInput}
+                            placeholder="What are you studying here?"
+                            placeholderTextColor="#6B7280"
+                            value={newDeckDesc}
+                            onChangeText={setNewDeckDesc}
+                        />
+
+                        <Text style={styles.modalLabel}>Branding Theme Color</Text>
+                        <View style={styles.colorPaletteRow}>
+                            {DECK_COLORS.map((color) => (
+                                <TouchableOpacity
+                                    key={color}
+                                    style={[styles.colorBubble, { backgroundColor: color }, newDeckColor === color && styles.activeColorBubble]}
+                                    onPress={() => setNewDeckColor(color)}
+                                />
+                            ))}
+                        </View>
+
+                        <TouchableOpacity style={styles.modalForgeButton} onPress={handleCreateCustomDeck}>
+                            <Text style={styles.modalForgeButtonText}>Forge Deck Structure</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.modalCancelButton} onPress={() => setIsModalVisible(false)}>
+                            <Text style={styles.modalCancelButtonText}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flexGrow: 1,
-        backgroundColor: '#111827',
-        padding: 24,
-        justifyContent: 'center',
-    },
-    formBox: {
-        width: '100%',
-    },
-    title: {
-        fontSize: 34,
-        fontWeight: 'bold',
-        color: '#FFFFFF',
-        marginBottom: 28,
-        textAlign: 'center',
-        letterSpacing: 0.5,
-    },
-    label: {
-        color: '#9CA3AF',
-        marginBottom: 8,
-        fontSize: 14,
-        fontWeight: '600',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-    },
-    selectorScroll: {
-        marginBottom: 20,
-        flexDirection: 'row',
-    },
-    selectorItem: {
-        backgroundColor: '#1F2937',
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 10,
-        marginRight: 8,
-        borderWidth: 1,
-        borderColor: '#374151',
-    },
-    activeTypeItem: {
-        backgroundColor: '#2563EB',
-        borderColor: '#3B82F6',
-    },
-    selectorText: {
-        color: '#FFFFFF',
-        fontWeight: '600',
-        fontSize: 14,
-    },
-    input: {
-        backgroundColor: '#1F2937',
-        color: '#FFFFFF',
-        borderRadius: 12,
-        padding: 14,
-        marginBottom: 20,
-        borderWidth: 1,
-        borderColor: '#374151',
-        fontSize: 16,
-    },
-    answerInput: {
-        minHeight: 90,
-        textAlignVertical: 'top',
-    },
-    button: {
-        backgroundColor: '#2563EB',
-        padding: 18,
-        borderRadius: 12,
-        marginTop: 8,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#3B82F6',
-    },
-    buttonText: {
-        color: '#FFFFFF',
-        fontWeight: '600',
-        fontSize: 18,
-    },
+    container: { flexGrow: 1, backgroundColor: '#111827', padding: 24, justifyContent: 'center' },
+    formBox: { width: '100%' },
+    title: { fontSize: 34, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 28, textAlign: 'center', letterSpacing: 0.5 },
+    headerLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+    plusTriggerButton: { backgroundColor: '#1F2937', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#374151' },
+    plusTriggerText: { color: '#60A5FA', fontSize: 12, fontWeight: '700' },
+    label: { color: '#9CA3AF', fontSize: 14, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+    selectorScroll: { marginBottom: 20, flexDirection: 'row' },
+    selectorItem: { backgroundColor: '#1F2937', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#374151' },
+    activeTypeItem: { backgroundColor: '#2563EB', borderColor: '#3B82F6' },
+    selectorText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
+    input: { backgroundColor: '#1F2937', color: '#FFFFFF', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#374151', fontSize: 16 },
+    answerInput: { minHeight: 90, textAlignVertical: 'top' },
+    button: { backgroundColor: '#2563EB', padding: 18, borderRadius: 12, marginTop: 8, alignItems: 'center', borderWidth: 1, borderColor: '#3B82F6' },
+    buttonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 18 },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'center', padding: 24 },
+    modalBox: { backgroundColor: '#1F2937', borderRadius: 20, padding: 24, borderWidth: 1, borderColor: '#374151' },
+    modalTitle: { color: '#FFFFFF', fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
+    modalLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 },
+    modalInput: { backgroundColor: '#111827', color: '#FFFFFF', borderRadius: 10, padding: 12, marginBottom: 18, fontSize: 15, borderWidth: 1, borderColor: '#374151' },
+    colorPaletteRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 24, paddingHorizontal: 4 },
+    colorBubble: { width: 32, height: 32, borderRadius: 16, borderWidth: 2, borderColor: 'transparent' },
+    activeColorBubble: { borderColor: '#FFFFFF', transform: [{ scale: 1.15 }] },
+    modalForgeButton: { backgroundColor: '#10B981', padding: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
+    modalForgeButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
+    modalCancelButton: { backgroundColor: '#374151', padding: 14, borderRadius: 12, alignItems: 'center' },
+    modalCancelButtonText: { color: '#9CA3AF', fontWeight: '600', fontSize: 16 }
 });

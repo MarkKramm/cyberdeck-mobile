@@ -367,7 +367,10 @@ export async function updateSetting(key: string, value: string) {
 // COUNTER UTILITIES
 export async function getCardCount() {
     const db = await getReadyDatabase();
-    const result = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM cards;');
+    // INNER JOIN with decks ensures we ONLY count cards whose parent decks actively exist
+    const result = await db.getFirstAsync<{ count: number }>(
+        'SELECT COUNT(c.id) as count FROM cards c JOIN decks d ON c.deck_id = d.id;'
+    );
     return result?.count ?? 0;
 }
 
@@ -381,12 +384,17 @@ export async function getHomeSummaryStats() {
     const db = await getReadyDatabase();
     const nowStr = new Date().toISOString();
 
+    // Calculate due cards only for decks that exist right now
     const dueResult = await db.getFirstAsync<{ count: number }>(
-        'SELECT COUNT(*) as count FROM cards WHERE due_at IS NULL OR due_at <= ?;', [nowStr]
+        'SELECT COUNT(c.id) as count FROM cards c JOIN decks d ON c.deck_id = d.id WHERE (c.due_at IS NULL OR c.due_at <= ?);', 
+        [nowStr]
     );
+
+    // Calculate new cards only for decks that exist right now
     const newResult = await db.getFirstAsync<{ count: number }>(
-        "SELECT COUNT(*) as count FROM cards WHERE difficulty = 'new';", []
+        "SELECT COUNT(c.id) as count FROM cards c JOIN decks d ON c.deck_id = d.id WHERE c.difficulty = 'new';"
     );
+
     const totalCards = await getCardCount();
     const totalReviews = await getTotalReviews();
 

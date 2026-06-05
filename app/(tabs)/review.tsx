@@ -11,7 +11,6 @@ export default function ReviewScreen() {
     const [showAnswer, setShowAnswer] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Dynamic queue fetch engine matching blueprint specifications
     async function refreshReviewQueue(deckFilter: string) {
         setIsLoading(true);
         try {
@@ -40,23 +39,24 @@ export default function ReviewScreen() {
     }
 
     async function handleScoreSelection(rating: string) {
-        if (dueCards.length === 0) return;
+        if (dueCards.length === 0 || currentIndex >= dueCards.length) return;
         const currentCard = dueCards[currentIndex];
 
-        // Process mathematical scheduling algorithm changes directly into local SQLite logs
+        // Process mathematical scheduling algorithm updates
         await rateCard(currentCard.id, currentCard.interval_days, rating);
 
-        // Advance to the next active item inside the local state array cache
         if (currentIndex + 1 < dueCards.length) {
             setCurrentIndex(currentIndex + 1);
             setShowAnswer(false);
         } else {
-            // Re-query the database once the current block of cards has been completed
+            // Re-query the database cleanly once index finishes
             await refreshReviewQueue(selectedDeckIdFilter);
         }
     }
 
+    // Bug Fix: Check bounds defensively so it never breaks on array boundaries
     const currentCard = dueCards[currentIndex];
+    const isCardValid = dueCards.length > 0 && currentIndex < dueCards.length && currentCard;
 
     if (isLoading) {
         return (
@@ -100,8 +100,8 @@ export default function ReviewScreen() {
                     ))}
                 </ScrollView>
 
-                {/* EMPTY REVIEW STATE COGNITIVE BALANCING LAYOUT */}
-                {dueCards.length === 0 ? (
+                {/* EMPTY REVIEW STATE */}
+                {!isCardValid ? (
                     <View style={styles.emptyBox}>
                         <Text style={styles.subtitle}>Queue Clear ✓</Text>
                         <Text style={styles.emptyHint}>
@@ -141,7 +141,6 @@ export default function ReviewScreen() {
                                     ) : null}
                                 </ScrollView>
 
-                                {/* ACTIVE BLUEPRINT SPACED REPETITION SCORING BUTTON BLOCK */}
                                 <View style={styles.ratingButtonWrapper}>
                                     <TouchableOpacity style={[styles.rateBtn, { backgroundColor: '#7F1D1D' }]} onPress={() => handleScoreSelection('Again')}>
                                         <Text style={styles.rateBtnText}>Again</Text>
@@ -170,174 +169,33 @@ export default function ReviewScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#111827',
-        padding: 24,
-        justifyContent: 'center',
-    },
-    contentBox: {
-        width: '100%',
-    },
-    title: {
-        fontSize: 34,
-        fontWeight: 'bold',
-        color: '#FFFFFF',
-        textAlign: 'center',
-        marginBottom: 16,
-    },
-    stateMessageText: {
-        color: '#9CA3AF',
-        fontSize: 16,
-        textAlign: 'center',
-    },
-    deckScroll: {
-        maxHeight: 46,
-        marginBottom: 20,
-    },
-    deckRow: {
-        flexGrow: 1,
-        justifyContent: 'flex-start',
-        gap: 8,
-    },
-    deckButton: {
-        backgroundColor: '#1F2937',
-        paddingVertical: 10,
-        paddingHorizontal: 16,
-        borderRadius: 12,
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#374151',
-    },
-    selectedDeckButton: {
-        backgroundColor: '#2563EB',
-        borderColor: '#3B82F6',
-    },
-    deckButtonText: {
-        color: '#D1D5DB',
-        fontWeight: '600',
-        fontSize: 14,
-    },
-    selectedDeckButtonText: {
-        color: '#FFFFFF',
-    },
-    emptyBox: {
-        backgroundColor: '#1F2937',
-        padding: 32,
-        borderRadius: 20,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#374151',
-    },
-    subtitle: {
-        color: '#FFFFFF',
-        fontSize: 24,
-        fontWeight: 'bold',
-        marginBottom: 10,
-    },
-    emptyHint: {
-        color: '#9CA3AF',
-        marginTop: 4,
-        textAlign: 'center',
-        fontSize: 15,
-        lineHeight: 22,
-    },
-    cardBox: {
-        backgroundColor: '#1F2937',
-        padding: 20,
-        borderRadius: 20,
-        borderWidth: 1,
-        borderColor: '#374151',
-        minHeight: 380,
-        justifyContent: 'space-between',
-    },
-    cardMetaHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 6,
-    },
-    counter: {
-        color: '#9CA3AF',
-        fontSize: 13,
-        fontWeight: '500',
-    },
-    typeBadge: {
-        backgroundColor: '#374151',
-        color: '#F3F4F6',
-        paddingVertical: 4,
-        paddingHorizontal: 10,
-        borderRadius: 6,
-        fontSize: 12,
-        fontWeight: '700',
-        textTransform: 'uppercase',
-    },
-    deckLabel: {
-        color: '#60A5FA',
-        fontSize: 12,
-        fontWeight: '700',
-        letterSpacing: 0.5,
-    },
-    divider: {
-        height: 1,
-        backgroundColor: '#374151',
-        marginVertical: 14,
-    },
-    sectionLabel: {
-        color: '#6B7280',
-        fontSize: 11,
-        fontWeight: '700',
-        letterSpacing: 1,
-        marginBottom: 8,
-    },
-    scrollableTextContainer: {
-        maxHeight: 110,
-    },
-    questionText: {
-        color: '#FFFFFF',
-        fontSize: 22,
-        fontWeight: 'bold',
-        lineHeight: 28,
-    },
-    answerText: {
-        color: '#E5E7EB',
-        fontSize: 18,
-        lineHeight: 26,
-    },
-    notesText: {
-        color: '#9CA3AF',
-        fontSize: 13,
-        fontStyle: 'italic',
-        marginTop: 10,
-    },
-    primaryActionButton: {
-        backgroundColor: '#2563EB',
-        padding: 16,
-        borderRadius: 12,
-        marginTop: 14,
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#3B82F6',
-    },
-    primaryActionText: {
-        color: '#FFFFFF',
-        fontWeight: '600',
-        fontSize: 18,
-    },
-    ratingButtonWrapper: {
-        flexDirection: 'row',
-        gap: 6,
-        marginTop: 16,
-    },
-    rateBtn: {
-        flex: 1,
-        paddingVertical: 14,
-        borderRadius: 10,
-        alignItems: 'center',
-    },
-    rateBtnText: {
-        color: '#FFFFFF',
-        fontWeight: '700',
-        fontSize: 14,
-    },
+    container: { flex: 1, backgroundColor: '#111827', padding: 24, justifyContent: 'center' },
+    contentBox: { width: '100%' },
+    title: { fontSize: 34, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', marginBottom: 16 },
+    stateMessageText: { color: '#9CA3AF', fontSize: 16, textAlign: 'center' },
+    deckScroll: { maxHeight: 46, marginBottom: 20 },
+    deckRow: { flexGrow: 1, justifyContent: 'flex-start', gap: 8 },
+    deckButton: { backgroundColor: '#1F2937', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12, justifyContent: 'center', borderWidth: 1, borderColor: '#374151' },
+    selectedDeckButton: { backgroundColor: '#2563EB', borderColor: '#3B82F6' },
+    deckButtonText: { color: '#D1D5DB', fontWeight: '600', fontSize: 14 },
+    selectedDeckButtonText: { color: '#FFFFFF' },
+    emptyBox: { backgroundColor: '#1F2937', padding: 32, borderRadius: 20, alignItems: 'center', borderWidth: 1, borderColor: '#374151' },
+    subtitle: { color: '#FFFFFF', fontSize: 24, fontWeight: 'bold', marginBottom: 10 },
+    emptyHint: { color: '#9CA3AF', marginTop: 4, textAlign: 'center', fontSize: 15, lineHeight: 22 },
+    cardBox: { backgroundColor: '#1F2937', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#374151', minHeight: 380, justifyContent: 'space-between' },
+    cardMetaHeader: { flexDirection: 'row', justify_content: 'space-between', alignItems: 'center', marginBottom: 6 },
+    counter: { color: '#9CA3AF', fontSize: 13, fontWeight: '500' },
+    typeBadge: { backgroundColor: '#374151', color: '#F3F4F6', paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6, fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
+    deckLabel: { color: '#60A5FA', fontSize: 12, fontWeight: '700', letterSpacing: 0.5 },
+    divider: { height: 1, backgroundColor: '#374151', marginVertical: 14 },
+    sectionLabel: { color: '#6B7280', fontSize: 11, fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+    scrollableTextContainer: { maxHeight: 110 },
+    questionText: { color: '#FFFFFF', fontSize: 22, fontWeight: 'bold', lineHeight: 28 },
+    answerText: { color: '#E5E7EB', fontSize: 18, lineHeight: 26 },
+    notesText: { color: '#9CA3AF', fontSize: 13, fontStyle: 'italic', marginTop: 10 },
+    primaryActionButton: { backgroundColor: '#2563EB', padding: 16, borderRadius: 12, marginTop: 14, alignItems: 'center', borderWidth: 1, borderColor: '#3B82F6' },
+    primaryActionText: { color: '#FFFFFF', fontWeight: '600', fontSize: 18 },
+    ratingButtonWrapper: { flexDirection: 'row', gap: 6, marginTop: 16 },
+    rateBtn: { flex: 1, paddingVertical: 14, borderRadius: 10, alignItems: 'center' },
+    rateBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 }
 });
