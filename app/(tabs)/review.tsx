@@ -1,127 +1,165 @@
-import {
-    DbCard,
-    getCardsByCategory,
-    getCategories,
-    incrementReviewCount,
-} from '@/src/database';
+import { DbCard, DbDeck, getAllDecks, getDueCards, rateCard } from '@/src/database';
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 export default function ReviewScreen() {
-    const [cards, setCards] = useState<DbCard[]>([]);
-    const [categories, setCategories] = useState<string[]>([]);
-    const [selectedCategory, setSelectedCategory] = useState('Uncategorized');
+    const [decks, setDecks] = useState<DbDeck[]>([]);
+    const [selectedDeckIdFilter, setSelectedDeckIdFilter] = useState<string>('All');
+    const [dueCards, setDueCards] = useState<DbCard[]>([]);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [showAnswer, setShowAnswer] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
 
-    async function loadReviewData(category: string) {
-        const savedCategories = await getCategories();
-
-        let activeCategory = category;
-
-        if (savedCategories.length > 0 && !savedCategories.includes(category)) {
-            activeCategory = savedCategories[0];
-            setSelectedCategory(savedCategories[0]);
+    // Dynamic queue fetch engine matching blueprint specifications
+    async function refreshReviewQueue(deckFilter: string) {
+        setIsLoading(true);
+        try {
+            const activeDecks = await getAllDecks();
+            const targetedDueQueue = await getDueCards(30, deckFilter);
+            
+            setDecks(activeDecks);
+            setDueCards(targetedDueQueue);
+            setCurrentIndex(0);
+            setShowAnswer(false);
+        } catch (error) {
+            console.error('Error fetching review queue data:', error);
+        } finally {
+            setIsLoading(false);
         }
-
-        const savedCards = await getCardsByCategory(activeCategory);
-
-        setCategories(savedCategories);
-        setCards(savedCards);
-        setCurrentIndex(0);
-        setShowAnswer(false);
     }
 
     useFocusEffect(
         useCallback(() => {
-            loadReviewData(selectedCategory);
-        }, [selectedCategory])
+            refreshReviewQueue(selectedDeckIdFilter);
+        }, [selectedDeckIdFilter])
     );
 
-    const currentCard = cards[currentIndex];
-
-    async function chooseCategory(category: string) {
-        setSelectedCategory(category);
-        await loadReviewData(category);
+    async function handleFilterChange(deckIdStr: string) {
+        setSelectedDeckIdFilter(deckIdStr);
     }
 
-    async function showNextCard() {
-        if (!currentCard || cards.length === 0) return;
+    async function handleScoreSelection(rating: string) {
+        if (dueCards.length === 0) return;
+        const currentCard = dueCards[currentIndex];
 
-        await incrementReviewCount(currentCard.id);
+        // Process mathematical scheduling algorithm changes directly into local SQLite logs
+        await rateCard(currentCard.id, currentCard.interval_days, rating);
 
-        const updatedCards = await getCardsByCategory(selectedCategory);
-        setCards(updatedCards);
+        // Advance to the next active item inside the local state array cache
+        if (currentIndex + 1 < dueCards.length) {
+            setCurrentIndex(currentIndex + 1);
+            setShowAnswer(false);
+        } else {
+            // Re-query the database once the current block of cards has been completed
+            await refreshReviewQueue(selectedDeckIdFilter);
+        }
+    }
 
-        const nextIndex = (currentIndex + 1) % updatedCards.length;
-        setCurrentIndex(nextIndex);
-        setShowAnswer(false);
+    const currentCard = dueCards[currentIndex];
+
+    if (isLoading) {
+        return (
+            <View style={styles.container}>
+                <Text style={styles.stateMessageText}>Accessing Secure Vault...</Text>
+            </View>
+        );
     }
 
     return (
         <View style={styles.container}>
             <View style={styles.contentBox}>
-                <Text style={styles.title}>Review</Text>
+                <Text style={styles.title}>Review Deck</Text>
 
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.categoryScroll}
-                    contentContainerStyle={styles.categoryRow}>
-                    {categories.map((category) => (
+                {/* HORIZONTAL DECK FILTER SELECTOR BAR */}
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.deckScroll} contentContainerStyle={styles.deckRow}>
+                    <TouchableOpacity
+                        style={[styles.deckButton, selectedDeckIdFilter === 'All' && styles.selectedDeckButton]}
+                        onPress={() => handleFilterChange('All')}
+                    >
+                        <Text style={[styles.deckButtonText, selectedDeckIdFilter === 'All' && styles.selectedDeckButtonText]}>
+                            🌐 All Decks
+                        </Text>
+                    </TouchableOpacity>
+                    {decks.map((deck) => (
                         <TouchableOpacity
-                            key={category}
+                            key={deck.id}
                             style={[
-                                styles.categoryButton,
-                                selectedCategory === category && styles.selectedCategoryButton,
+                                styles.deckButton,
+                                selectedDeckIdFilter === deck.id.toString() && { backgroundColor: deck.color || '#2563EB' }
                             ]}
-                            onPress={() => chooseCategory(category)}>
-                            <Text
-                                style={[
-                                    styles.categoryButtonText,
-                                    selectedCategory === category && styles.selectedCategoryButtonText,
-                                ]}>
-                                {category}
+                            onPress={() => handleFilterChange(deck.id.toString())}
+                        >
+                            <Text style={[
+                                styles.deckButtonText, 
+                                selectedDeckIdFilter === deck.id.toString() && styles.selectedDeckButtonText
+                            ]}>
+                                📁 {deck.name}
                             </Text>
                         </TouchableOpacity>
                     ))}
                 </ScrollView>
 
-                {cards.length === 0 ? (
+                {/* EMPTY REVIEW STATE COGNITIVE BALANCING LAYOUT */}
+                {dueCards.length === 0 ? (
                     <View style={styles.emptyBox}>
-                        <Text style={styles.subtitle}>No cards found.</Text>
-                        <Text style={styles.emptyHint}>Add a card first to start reviewing.</Text>
+                        <Text style={styles.subtitle}>Queue Clear ✓</Text>
+                        <Text style={styles.emptyHint}>
+                            Your memory paths are stable. No cyber concepts are currently due for execution review.
+                        </Text>
                     </View>
                 ) : (
                     <View style={styles.cardBox}>
-                        <Text style={styles.counter}>
-                            Card {currentIndex + 1} of {cards.length}
+                        <View style={styles.cardMetaHeader}>
+                            <Text style={styles.counter}>
+                                Concepts: {currentIndex + 1} / {dueCards.length}
+                            </Text>
+                            <Text style={styles.typeBadge}>
+                                {currentCard.card_type}
+                            </Text>
+                        </View>
+
+                        <Text style={styles.deckLabel}>
+                            DECK: {currentCard.deck_name || 'Unassigned'}
                         </Text>
 
-                        <Text style={styles.categoryLabel}>
-                            {currentCard.category || 'Uncategorized'}
-                        </Text>
+                        <View style={styles.divider} />
 
-                        <Text style={styles.reviewCount}>
-                            Reviews: {currentCard.review_count ?? 0}
-                        </Text>
-
-                        <Text style={styles.label}>Question</Text>
-                        <Text style={styles.question}>{currentCard.question}</Text>
+                        <Text style={styles.sectionLabel}>FRONT (CONCEPT)</Text>
+                        <ScrollView style={styles.scrollableTextContainer}>
+                            <Text style={styles.questionText}>{currentCard.front}</Text>
+                        </ScrollView>
 
                         {showAnswer ? (
                             <>
-                                <Text style={styles.label}>Answer</Text>
-                                <Text style={styles.answer}>{currentCard.answer}</Text>
+                                <View style={styles.divider} />
+                                <Text style={styles.sectionLabel}>BACK (LOGIC ENGINE)</Text>
+                                <ScrollView style={styles.scrollableTextContainer}>
+                                    <Text style={styles.answerText}>{currentCard.back}</Text>
+                                    {currentCard.notes ? (
+                                        <Text style={styles.notesText}>💡 Note: {currentCard.notes}</Text>
+                                    ) : null}
+                                </ScrollView>
 
-                                <TouchableOpacity style={styles.button} onPress={showNextCard}>
-                                    <Text style={styles.buttonText}>Reviewed ✓</Text>
-                                </TouchableOpacity>
+                                {/* ACTIVE BLUEPRINT SPACED REPETITION SCORING BUTTON BLOCK */}
+                                <View style={styles.ratingButtonWrapper}>
+                                    <TouchableOpacity style={[styles.rateBtn, { backgroundColor: '#7F1D1D' }]} onPress={() => handleScoreSelection('Again')}>
+                                        <Text style={styles.rateBtnText}>Again</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.rateBtn, { backgroundColor: '#B45309' }]} onPress={() => handleScoreSelection('Hard')}>
+                                        <Text style={styles.rateBtnText}>Hard</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.rateBtn, { backgroundColor: '#047857' }]} onPress={() => handleScoreSelection('Good')}>
+                                        <Text style={styles.rateBtnText}>Good</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={[styles.rateBtn, { backgroundColor: '#1D4ED8' }]} onPress={() => handleScoreSelection('Easy')}>
+                                        <Text style={styles.rateBtnText}>Easy</Text>
+                                    </TouchableOpacity>
+                                </View>
                             </>
                         ) : (
-                            <TouchableOpacity style={styles.button} onPress={() => setShowAnswer(true)}>
-                                <Text style={styles.buttonText}>Show Answer</Text>
+                            <TouchableOpacity style={styles.primaryActionButton} onPress={() => setShowAnswer(true)}>
+                                <Text style={styles.primaryActionText}>Reveal Answer</Text>
                             </TouchableOpacity>
                         )}
                     </View>
@@ -142,104 +180,164 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     title: {
-        fontSize: 36,
+        fontSize: 34,
         fontWeight: 'bold',
-        color: 'white',
+        color: '#FFFFFF',
         textAlign: 'center',
-        marginBottom: 18,
+        marginBottom: 16,
     },
-    categoryScroll: {
-        maxHeight: 44,
-        marginBottom: 24,
+    stateMessageText: {
+        color: '#9CA3AF',
+        fontSize: 16,
+        textAlign: 'center',
     },
-    categoryRow: {
+    deckScroll: {
+        maxHeight: 46,
+        marginBottom: 20,
+    },
+    deckRow: {
         flexGrow: 1,
-        justifyContent: 'center',
-        gap: 10,
+        justifyContent: 'flex-start',
+        gap: 8,
     },
-    categoryButton: {
+    deckButton: {
         backgroundColor: '#1F2937',
-        paddingVertical: 8,
+        paddingVertical: 10,
         paddingHorizontal: 16,
-        borderRadius: 999,
+        borderRadius: 12,
         justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#374151',
     },
-    selectedCategoryButton: {
+    selectedDeckButton: {
         backgroundColor: '#2563EB',
+        borderColor: '#3B82F6',
     },
-    categoryButtonText: {
+    deckButtonText: {
         color: '#D1D5DB',
         fontWeight: '600',
+        fontSize: 14,
     },
-    selectedCategoryButtonText: {
-        color: 'white',
+    selectedDeckButtonText: {
+        color: '#FFFFFF',
     },
     emptyBox: {
         backgroundColor: '#1F2937',
-        padding: 20,
-        borderRadius: 16,
+        padding: 32,
+        borderRadius: 20,
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#374151',
     },
     subtitle: {
-        color: 'white',
-        fontSize: 20,
+        color: '#FFFFFF',
+        fontSize: 24,
         fontWeight: 'bold',
+        marginBottom: 10,
     },
     emptyHint: {
         color: '#9CA3AF',
-        marginTop: 8,
+        marginTop: 4,
         textAlign: 'center',
+        fontSize: 15,
+        lineHeight: 22,
     },
     cardBox: {
         backgroundColor: '#1F2937',
         padding: 20,
-        borderRadius: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#374151',
+        minHeight: 380,
+        justifyContent: 'space-between',
+    },
+    cardMetaHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 6,
     },
     counter: {
         color: '#9CA3AF',
-        marginBottom: 8,
-        fontSize: 14,
+        fontSize: 13,
+        fontWeight: '500',
     },
-    categoryLabel: {
-        color: '#60A5FA',
-        fontSize: 14,
+    typeBadge: {
+        backgroundColor: '#374151',
+        color: '#F3F4F6',
+        paddingVertical: 4,
+        paddingHorizontal: 10,
+        borderRadius: 6,
+        fontSize: 12,
         fontWeight: '700',
-        marginBottom: 8,
         textTransform: 'uppercase',
     },
-    reviewCount: {
-        color: '#10B981',
-        marginBottom: 16,
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    label: {
+    deckLabel: {
         color: '#60A5FA',
-        fontWeight: 'bold',
-        marginBottom: 8,
-        marginTop: 8,
+        fontSize: 12,
+        fontWeight: '700',
+        letterSpacing: 0.5,
     },
-    question: {
-        color: 'white',
+    divider: {
+        height: 1,
+        backgroundColor: '#374151',
+        marginVertical: 14,
+    },
+    sectionLabel: {
+        color: '#6B7280',
+        fontSize: 11,
+        fontWeight: '700',
+        letterSpacing: 1,
+        marginBottom: 8,
+    },
+    scrollableTextContainer: {
+        maxHeight: 110,
+    },
+    questionText: {
+        color: '#FFFFFF',
         fontSize: 22,
         fontWeight: 'bold',
-        marginBottom: 20,
+        lineHeight: 28,
     },
-    answer: {
-        color: '#D1D5DB',
+    answerText: {
+        color: '#E5E7EB',
         fontSize: 18,
-        marginBottom: 24,
+        lineHeight: 26,
     },
-    button: {
+    notesText: {
+        color: '#9CA3AF',
+        fontSize: 13,
+        fontStyle: 'italic',
+        marginTop: 10,
+    },
+    primaryActionButton: {
         backgroundColor: '#2563EB',
         padding: 16,
         borderRadius: 12,
-        marginTop: 10,
+        marginTop: 14,
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: '#3B82F6',
     },
-    buttonText: {
-        color: 'white',
+    primaryActionText: {
+        color: '#FFFFFF',
         fontWeight: '600',
         fontSize: 18,
+    },
+    ratingButtonWrapper: {
+        flexDirection: 'row',
+        gap: 6,
+        marginTop: 16,
+    },
+    rateBtn: {
+        flex: 1,
+        paddingVertical: 14,
+        borderRadius: 10,
+        alignItems: 'center',
+    },
+    rateBtnText: {
+        color: '#FFFFFF',
+        fontWeight: '700',
+        fontSize: 14,
     },
 });
