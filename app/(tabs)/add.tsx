@@ -13,10 +13,9 @@ export default function AddScreen() {
             return;
         }
 
-        await saveCard(category.trim() || 'General', question.trim(), answer.trim());
+        await saveCard(category.trim() || 'Uncategorized', question.trim(), answer.trim());
 
         Keyboard.dismiss();
-
         Alert.alert('Card Saved!', 'Your card was added to CyberDeck.');
 
         setCategory('');
@@ -26,39 +25,41 @@ export default function AddScreen() {
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Add Card</Text>
+            <View style={styles.formBox}>
+                <Text style={styles.title}>Add Card</Text>
 
-            <Text style={styles.label}>Category</Text>
-            <TextInput
-                style={styles.input}
-                placeholder="Linux, Networking, THM..."
-                placeholderTextColor="#9CA3AF"
-                value={category}
-                onChangeText={setCategory}
-            />
+                <Text style={styles.label}>Category</Text>
+                <TextInput
+                    style={styles.input}
+                    placeholder="Linux, Networking, THM... or leave blank"
+                    placeholderTextColor="#9CA3AF"
+                    value={category}
+                    onChangeText={setCategory}
+                />
 
-            <Text style={styles.label}>Question</Text>
-            <TextInput
-                style={styles.input}
-                placeholder="What is DNS?"
-                placeholderTextColor="#9CA3AF"
-                value={question}
-                onChangeText={setQuestion}
-            />
+                <Text style={styles.label}>Question</Text>
+                <TextInput
+                    style={styles.input}
+                    placeholder="What is DNS?"
+                    placeholderTextColor="#9CA3AF"
+                    value={question}
+                    onChangeText={setQuestion}
+                />
 
-            <Text style={styles.label}>Answer</Text>
-            <TextInput
-                style={[styles.input, styles.answerInput]}
-                placeholder="DNS translates names into IP addresses."
-                placeholderTextColor="#9CA3AF"
-                multiline
-                value={answer}
-                onChangeText={setAnswer}
-            />
+                <Text style={styles.label}>Answer</Text>
+                <TextInput
+                    style={[styles.input, styles.answerInput]}
+                    placeholder="DNS translates names into IP addresses."
+                    placeholderTextColor="#9CA3AF"
+                    multiline
+                    value={answer}
+                    onChangeText={setAnswer}
+                />
 
-            <TouchableOpacity style={styles.button} onPress={handleSaveCard}>
-                <Text style={styles.buttonText}>Save Card</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.button} onPress={handleSaveCard}>
+                    <Text style={styles.buttonText}>Save Card</Text>
+                </TouchableOpacity>
+            </View>
         </View>
     );
 }
@@ -68,12 +69,17 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#111827',
         padding: 24,
+        justifyContent: 'center',
+    },
+    formBox: {
+        width: '100%',
     },
     title: {
-        fontSize: 32,
+        fontSize: 36,
         fontWeight: 'bold',
         color: 'white',
-        marginBottom: 30,
+        marginBottom: 34,
+        textAlign: 'center',
     },
     label: {
         color: 'white',

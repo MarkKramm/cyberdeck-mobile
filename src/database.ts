@@ -9,6 +9,8 @@ export type DbCard = {
     review_count: number;
 };
 
+const DEFAULT_CATEGORY = 'Uncategorized';
+
 let initializationPromise: Promise<void> | null = null;
 
 export async function openDatabase() {
@@ -26,7 +28,7 @@ export async function initializeDatabase() {
         await db.execAsync(`
       CREATE TABLE IF NOT EXISTS cards (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        category TEXT DEFAULT 'General',
+        category TEXT DEFAULT '${DEFAULT_CATEGORY}',
         question TEXT NOT NULL,
         answer TEXT NOT NULL,
         created_at TEXT NOT NULL,
@@ -37,7 +39,7 @@ export async function initializeDatabase() {
         try {
             await db.execAsync(`
         ALTER TABLE cards
-        ADD COLUMN category TEXT DEFAULT 'General';
+        ADD COLUMN category TEXT DEFAULT '${DEFAULT_CATEGORY}';
       `);
         } catch { }
 
@@ -47,6 +49,15 @@ export async function initializeDatabase() {
         ADD COLUMN review_count INTEGER DEFAULT 0;
       `);
         } catch { }
+
+        await db.runAsync(
+            `
+        UPDATE cards
+        SET category = ?
+        WHERE category IS NULL OR TRIM(category) = '' OR category = 'General';
+      `,
+            [DEFAULT_CATEGORY]
+        );
 
         console.log('Database initialized');
     })();
@@ -59,30 +70,43 @@ async function getReadyDatabase() {
     return await openDatabase();
 }
 
+function normalizeCategory(category: string) {
+    const cleanCategory = category.trim();
+
+    if (!cleanCategory || cleanCategory === 'General') {
+        return DEFAULT_CATEGORY;
+    }
+
+    return cleanCategory;
+}
+
 export async function saveCard(category: string, question: string, answer: string) {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
 
     await db.runAsync(
         'INSERT INTO cards (category, question, answer, created_at, review_count) VALUES (?, ?, ?, ?, ?);',
-        [category || 'General', question, answer, now, 0]
+        [normalizeCategory(category), question, answer, now, 0]
     );
 }
 
 export async function getAllCards() {
     const db = await getReadyDatabase();
 
-    return await db.getAllAsync<DbCard>(`
-    SELECT
-      id,
-      COALESCE(category, 'General') as category,
-      question,
-      answer,
-      created_at,
-      COALESCE(review_count, 0) as review_count
-    FROM cards
-    ORDER BY created_at DESC;
-  `);
+    return await db.getAllAsync<DbCard>(
+        `
+      SELECT
+        id,
+        COALESCE(category, ?) as category,
+        question,
+        answer,
+        created_at,
+        COALESCE(review_count, 0) as review_count
+      FROM cards
+      ORDER BY created_at DESC;
+    `,
+        [DEFAULT_CATEGORY]
+    );
 }
 
 export async function getCardsByCategory(category: string) {
@@ -96,29 +120,38 @@ export async function getCardsByCategory(category: string) {
         `
       SELECT
         id,
-        COALESCE(category, 'General') as category,
+        COALESCE(category, ?) as category,
         question,
         answer,
         created_at,
         COALESCE(review_count, 0) as review_count
       FROM cards
-      WHERE COALESCE(category, 'General') = ?
+      WHERE COALESCE(category, ?) = ?
       ORDER BY created_at DESC;
     `,
-        [category]
+        [DEFAULT_CATEGORY, DEFAULT_CATEGORY, category]
     );
 }
 
 export async function getCategories() {
     const db = await getReadyDatabase();
 
-    const rows = await db.getAllAsync<{ category: string }>(`
-    SELECT DISTINCT COALESCE(category, 'General') as category
-    FROM cards
-    ORDER BY category ASC;
-  `);
+    const rows = await db.getAllAsync<{ category: string }>(
+        `
+      SELECT DISTINCT COALESCE(category, ?) as category
+      FROM cards
+      ORDER BY category ASC;
+    `,
+        [DEFAULT_CATEGORY]
+    );
 
-    return ['All', ...rows.map((row) => row.category)];
+    const categories = rows.map((row) => row.category);
+
+    if (categories.length <= 1) {
+        return categories;
+    }
+
+    return ['All', ...categories];
 }
 
 export async function updateCard(
@@ -131,7 +164,7 @@ export async function updateCard(
 
     await db.runAsync(
         'UPDATE cards SET category = ?, question = ?, answer = ? WHERE id = ?;',
-        [category || 'General', question, answer, id]
+        [normalizeCategory(category), question, answer, id]
     );
 }
 
@@ -166,9 +199,9 @@ export async function incrementReviewCount(id: number) {
 
     await db.runAsync(
         `
-    UPDATE cards
-    SET review_count = COALESCE(review_count, 0) + 1
-    WHERE id = ?;
+      UPDATE cards
+      SET review_count = COALESCE(review_count, 0) + 1
+      WHERE id = ?;
     `,
         [id]
     );

@@ -10,8 +10,8 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 
 export default function ReviewScreen() {
     const [cards, setCards] = useState<DbCard[]>([]);
-    const [categories, setCategories] = useState<string[]>(['All']);
-    const [selectedCategory, setSelectedCategory] = useState('All');
+    const [categories, setCategories] = useState<string[]>([]);
+    const [selectedCategory, setSelectedCategory] = useState('Uncategorized');
     const [currentIndex, setCurrentIndex] = useState(0);
     const [showAnswer, setShowAnswer] = useState(false);
 
@@ -20,9 +20,9 @@ export default function ReviewScreen() {
 
         let activeCategory = category;
 
-        if (!savedCategories.includes(category)) {
-            activeCategory = 'All';
-            setSelectedCategory('All');
+        if (savedCategories.length > 0 && !savedCategories.includes(category)) {
+            activeCategory = savedCategories[0];
+            setSelectedCategory(savedCategories[0]);
         }
 
         const savedCards = await getCardsByCategory(activeCategory);
@@ -61,45 +61,46 @@ export default function ReviewScreen() {
 
     return (
         <View style={styles.container}>
-            <Text style={styles.title}>Review</Text>
+            <View style={styles.contentBox}>
+                <Text style={styles.title}>Review</Text>
 
-            <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.categoryScroll}
-                contentContainerStyle={styles.categoryRow}>
-                {categories.map((category) => (
-                    <TouchableOpacity
-                        key={category}
-                        style={[
-                            styles.categoryButton,
-                            selectedCategory === category && styles.selectedCategoryButton,
-                        ]}
-                        onPress={() => chooseCategory(category)}>
-                        <Text
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={styles.categoryScroll}
+                    contentContainerStyle={styles.categoryRow}>
+                    {categories.map((category) => (
+                        <TouchableOpacity
+                            key={category}
                             style={[
-                                styles.categoryButtonText,
-                                selectedCategory === category && styles.selectedCategoryButtonText,
-                            ]}>
-                            {category}
-                        </Text>
-                    </TouchableOpacity>
-                ))}
-            </ScrollView>
+                                styles.categoryButton,
+                                selectedCategory === category && styles.selectedCategoryButton,
+                            ]}
+                            onPress={() => chooseCategory(category)}>
+                            <Text
+                                style={[
+                                    styles.categoryButtonText,
+                                    selectedCategory === category && styles.selectedCategoryButtonText,
+                                ]}>
+                                {category}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
 
-            {cards.length === 0 ? (
-                <Text style={styles.subtitle}>
-                    No cards found for this category.
-                </Text>
-            ) : (
-                <View style={styles.centerArea}>
+                {cards.length === 0 ? (
+                    <View style={styles.emptyBox}>
+                        <Text style={styles.subtitle}>No cards found.</Text>
+                        <Text style={styles.emptyHint}>Add a card first to start reviewing.</Text>
+                    </View>
+                ) : (
                     <View style={styles.cardBox}>
                         <Text style={styles.counter}>
                             Card {currentIndex + 1} of {cards.length}
                         </Text>
 
                         <Text style={styles.categoryLabel}>
-                            {currentCard.category || 'General'}
+                            {currentCard.category || 'Uncategorized'}
                         </Text>
 
                         <Text style={styles.reviewCount}>
@@ -119,15 +120,13 @@ export default function ReviewScreen() {
                                 </TouchableOpacity>
                             </>
                         ) : (
-                            <TouchableOpacity
-                                style={styles.button}
-                                onPress={() => setShowAnswer(true)}>
+                            <TouchableOpacity style={styles.button} onPress={() => setShowAnswer(true)}>
                                 <Text style={styles.buttonText}>Show Answer</Text>
                             </TouchableOpacity>
                         )}
                     </View>
-                </View>
-            )}
+                )}
+            </View>
         </View>
     );
 }
@@ -137,27 +136,33 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#111827',
         padding: 24,
-        paddingTop: 60,
+        justifyContent: 'center',
+    },
+    contentBox: {
+        width: '100%',
     },
     title: {
-        fontSize: 32,
+        fontSize: 36,
         fontWeight: 'bold',
         color: 'white',
+        textAlign: 'center',
         marginBottom: 18,
     },
     categoryScroll: {
-        maxHeight: 48,
-        marginBottom: 18,
+        maxHeight: 44,
+        marginBottom: 24,
     },
     categoryRow: {
+        flexGrow: 1,
+        justifyContent: 'center',
         gap: 10,
-        paddingRight: 24,
     },
     categoryButton: {
         backgroundColor: '#1F2937',
-        paddingVertical: 10,
-        paddingHorizontal: 14,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
         borderRadius: 999,
+        justifyContent: 'center',
     },
     selectedCategoryButton: {
         backgroundColor: '#2563EB',
@@ -169,13 +174,21 @@ const styles = StyleSheet.create({
     selectedCategoryButtonText: {
         color: 'white',
     },
-    subtitle: {
-        color: '#D1D5DB',
-        fontSize: 18,
+    emptyBox: {
+        backgroundColor: '#1F2937',
+        padding: 20,
+        borderRadius: 16,
+        alignItems: 'center',
     },
-    centerArea: {
-        flex: 1,
-        justifyContent: 'center',
+    subtitle: {
+        color: 'white',
+        fontSize: 20,
+        fontWeight: 'bold',
+    },
+    emptyHint: {
+        color: '#9CA3AF',
+        marginTop: 8,
+        textAlign: 'center',
     },
     cardBox: {
         backgroundColor: '#1F2937',
