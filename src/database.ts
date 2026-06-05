@@ -1,6 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
-// --- TypeScript Types Matching Blueprint Specs ---
+// --- TypeScript Types ---
 export type DbDeck = {
     id: number;
     name: string;
@@ -18,14 +18,14 @@ export type DbCard = {
     back: string;
     tags: string | null;
     notes: string | null;
-    difficulty: string; // 'new', 'again', 'hard', 'good', 'easy'
-    due_at: string | null; // ISO text string
+    difficulty: string;
+    due_at: string | null;
     interval_days: number;
     review_count: number;
     lapse_count: number;
     created_at: string;
     updated_at: string;
-    deck_name?: string; // Appended via JOINs
+    deck_name?: string;
 };
 
 export type DbMistake = {
@@ -33,7 +33,7 @@ export type DbMistake = {
     title: string;
     explanation: string | null;
     related_card_id: number | null;
-    status: string; // 'open', 'resolved'
+    status: string;
     created_at: string;
     updated_at: string;
 };
@@ -50,9 +50,6 @@ export async function openDatabase() {
     return await SQLite.openDatabaseAsync('cyberdeck.db');
 }
 
-/**
- * Initializes the entire relational schema at once.
- */
 export async function initializeDatabase() {
     if (initializationPromise) {
         return initializationPromise;
@@ -73,7 +70,7 @@ export async function initializeDatabase() {
             );
         `);
 
-        // 2. Create Cards Table (With Spaced Repetition Fields)
+        // 2. Create Cards Table
         await db.execAsync(`
             CREATE TABLE IF NOT EXISTS cards (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,10 +133,8 @@ export async function initializeDatabase() {
             );
         `);
 
-        // Seed default foundational decks safely
         await seedDefaultDecks(db);
-
-        console.log('CyberDeck Schema V1.0 initialized.');
+        console.log('CyberDeck Schema V1.0 initialized cleanly.');
     })();
 
     return initializationPromise;
@@ -150,9 +145,6 @@ async function getReadyDatabase() {
     return await openDatabase();
 }
 
-/**
- * Safely seeds core foundational decks from Blueprint
- */
 async function seedDefaultDecks(db: SQLite.SQLiteDatabase) {
     const now = new Date().toISOString();
     const starterDecks = [
@@ -176,9 +168,7 @@ async function seedDefaultDecks(db: SQLite.SQLiteDatabase) {
     }
 }
 
-// ==========================================
-// 📁 DECK CRUD OPERATIONS
-// ==========================================
+// DECK CRUD
 export async function getAllDecks() {
     const db = await getReadyDatabase();
     return await db.getAllAsync<DbDeck>('SELECT * FROM decks ORDER BY name ASC;');
@@ -193,17 +183,8 @@ export async function createDeck(name: string, description: string = '', color: 
     );
 }
 
-// ==========================================
-// 📇 CARD CRUD OPERATIONS & SEARCH
-// ==========================================
-export async function saveCard(
-    deckId: number,
-    cardType: string,
-    front: string,
-    back: string,
-    tags: string = '',
-    notes: string = ''
-) {
+// CARD CRUD
+export async function saveCard(deckId: number, cardType: string, front: string, back: string, tags: string = '', notes: string = '') {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
     await db.runAsync(
@@ -213,15 +194,7 @@ export async function saveCard(
     );
 }
 
-export async function updateCard(
-    id: number,
-    deckId: number,
-    cardType: string,
-    front: string,
-    back: string,
-    tags: string,
-    notes: string
-) {
+export async function updateCard(id: number, deckId: number, cardType: string, front: string, back: string, tags: string, notes: string) {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
     await db.runAsync(
@@ -235,27 +208,6 @@ export async function deleteCard(id: number) {
     await db.runAsync('DELETE FROM cards WHERE id = ?;', [id]);
 }
 
-export async function searchCards(query: string, deckIdFilter: string = 'All') {
-    const db = await getReadyDatabase();
-    const wildcard = `%${query}%`;
-    
-    let sql = `
-        SELECT c.*, d.name AS deck_name 
-        FROM cards c
-        JOIN decks d ON d.id = c.deck_id
-        WHERE (c.front LIKE ? OR c.back LIKE ? OR c.tags LIKE ?)
-    `;
-    const params: any[] = [wildcard, wildcard, wildcard];
-
-    if (deckIdFilter !== 'All') {
-        sql += ' AND c.deck_id = ?';
-        params.push(parseInt(deckIdFilter, 10));
-    }
-    
-    sql += ' ORDER BY c.created_at DESC;';
-    return await db.getAllAsync<DbCard>(sql, params);
-}
-
 export async function getAllCards() {
     const db = await getReadyDatabase();
     return await db.getAllAsync<DbCard>(
@@ -263,9 +215,7 @@ export async function getAllCards() {
     );
 }
 
-// ==========================================
-// 🧠 SPACED REPETITION ENGINE (v0.4 CORE)
-// ==========================================
+// REVIEW SYSTEM OPERATIONS
 export async function getDueCards(limit: number = 30, deckIdFilter: string = 'All') {
     const db = await getReadyDatabase();
     const nowStr = new Date().toISOString();
@@ -356,9 +306,7 @@ export async function rateCard(cardId: number, currentInterval: number, rating: 
     );
 }
 
-// ==========================================
-// 🎯 MISTAKE BANK & WIN LOG SYSTEM (v0.5)
-// ==========================================
+// MISTAKE BANK OPERATIONS
 export async function getAllMistakes() {
     const db = await getReadyDatabase();
     return await db.getAllAsync<DbMistake>('SELECT * FROM mistakes ORDER BY created_at DESC;');
@@ -387,6 +335,7 @@ export async function deleteMistake(id: number) {
     await db.runAsync('DELETE FROM mistakes WHERE id = ?;', [id]);
 }
 
+// WIN LOG OPERATIONS
 export async function getAllWins() {
     const db = await getReadyDatabase();
     return await db.getAllAsync<DbWin>('SELECT * FROM wins ORDER BY created_at DESC;');
@@ -403,9 +352,19 @@ export async function deleteWin(id: number) {
     await db.runAsync('DELETE FROM wins WHERE id = ?;', [id]);
 }
 
-// ==========================================
-// 📈 GLOBAL METRIC COUNTERS
-// ==========================================
+// SETTINGS KEY-VALUE ACCESSORS
+export async function getSetting(key: string) {
+    const db = await getReadyDatabase();
+    const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM settings WHERE key = ?;', [key]);
+    return row?.value ?? null;
+}
+
+export async function updateSetting(key: string, value: string) {
+    const db = await getReadyDatabase();
+    await db.runAsync('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);', [key, value]);
+}
+
+// COUNTER UTILITIES
 export async function getCardCount() {
     const db = await getReadyDatabase();
     const result = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM cards;');
