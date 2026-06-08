@@ -44,33 +44,42 @@ export type DbWin = {
     created_at: string;
 };
 
+export type DbReviewLog = {
+    id: number;
+    card_id: number;
+    mode: 'srs' | 're-view';
+    rating?: string | null;
+    created_at: string;
+};
+
+let dbInstance: SQLite.SQLiteDatabase | null = null;
 let initializationPromise: Promise<void> | null = null;
 
-export async function openDatabase() {
-    return await SQLite.openDatabaseAsync('cyberdeck.db');
+export async function openDatabase(): Promise<SQLite.SQLiteDatabase> {
+    if (dbInstance) return dbInstance;
+    dbInstance = await SQLite.openDatabaseAsync('cyberdeck.db');
+    return dbInstance;
 }
 
-export async function initializeDatabase() {
-    if (initializationPromise) {
-        return initializationPromise;
-    }
+export function initializeDatabase(): Promise<void> {
+    if (initializationPromise) return initializationPromise;
 
     initializationPromise = (async () => {
         const db = await openDatabase();
 
-        // 1. Create Decks Table
+        // 1. Decks Table
         await db.execAsync(`
             CREATE TABLE IF NOT EXISTS decks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
                 description TEXT,
                 color TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
         `);
 
-        // 2. Create Cards Table
+        // 2. Cards Table
         await db.execAsync(`
             CREATE TABLE IF NOT EXISTS cards (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,25 +94,13 @@ export async function initializeDatabase() {
                 interval_days INTEGER DEFAULT 0,
                 review_count INTEGER DEFAULT 0,
                 lapse_count INTEGER DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY(deck_id) REFERENCES decks(id) ON DELETE CASCADE
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
             );
         `);
 
-        // 3. Create Reviews History Table
-        await db.execAsync(`
-            CREATE TABLE IF NOT EXISTS reviews (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                card_id INTEGER NOT NULL,
-                rating TEXT NOT NULL,
-                reviewed_at TEXT NOT NULL,
-                next_due_at TEXT,
-                FOREIGN KEY(card_id) REFERENCES cards(id) ON DELETE CASCADE
-            );
-        `);
-
-        // 4. Create Mistakes Bank Table
+        // 3. Mistakes Table
         await db.execAsync(`
             CREATE TABLE IF NOT EXISTS mistakes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -111,30 +108,41 @@ export async function initializeDatabase() {
                 explanation TEXT,
                 related_card_id INTEGER,
                 status TEXT DEFAULT 'open',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
         `);
 
-        // 5. Create Win Log Table
+        // 4. Wins Table
         await db.execAsync(`
             CREATE TABLE IF NOT EXISTS wins (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 text TEXT NOT NULL,
-                created_at TEXT NOT NULL
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
         `);
 
-        // 6. Create Settings Table
+        // 5. NEW: Ghost Review Logs Table (Tracks both SRS and Re-View Sessions separately)
         await db.execAsync(`
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
+            CREATE TABLE IF NOT EXISTS review_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                card_id INTEGER NOT NULL,
+                mode TEXT NOT NULL, -- 'srs' or 're-view'
+                rating TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE
             );
         `);
 
-        await seedDefaultDecks(db);
-        console.log('CyberDeck Schema V1.0 initialized cleanly.');
+        // --- SEED SELECTION SAFEGUARD ---
+        const deckCheck = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM decks;');
+        if (deckCheck && deckCheck.count === 0) {
+            const now = new Date().toISOString();
+            await db.runAsync("INSERT INTO decks (name, description, color, created_at, updated_at) VALUES ('🔴 Red Team & Active Exploitation', 'Deep dive hacking vectors.', '#EF4444', ?, ?);", [now, now]);
+            await db.runAsync("INSERT INTO decks (name, description, color, created_at, updated_at) VALUES ('🔵 Blue Team & Digital Forensics', 'Incident analysis mappings.', '#2563EB', ?, ?);", [now, now]);
+            await db.runAsync("INSERT INTO decks (name, description, color, created_at, updated_at) VALUES ('🌐 Network Perimeter Analysis', 'Routing protocols and traffic rules.', '#10B981', ?, ?);", [now, now]);
+            await db.runAsync("INSERT INTO decks (name, description, color, created_at, updated_at) VALUES ('⚙️ Cloud & Container Security', 'IAM definitions and Docker clusters.', '#8B5CF6', ?, ?);", [now, now]);
+        }
     })();
 
     return initializationPromise;
@@ -142,241 +150,196 @@ export async function initializeDatabase() {
 
 async function getReadyDatabase() {
     await initializeDatabase();
-    return await openDatabase();
+    return openDatabase();
 }
 
-async function seedDefaultDecks(db: SQLite.SQLiteDatabase) {
-    const now = new Date().toISOString();
-    const starterDecks = [
-        { name: 'Linux Survival', desc: 'Remember basic terminal commands and paths', color: '#3B82F6' },
-        { name: 'Networking Basics', desc: 'Remember DNS, IP, ports, TCP/UDP, HTTP', color: '#10B981' },
-        { name: 'Security Language', desc: 'Remember risk, threat, vulnerability, controls', color: '#EF4444' },
-        { name: 'Web Basics', desc: 'Remember request/response, cookies, sessions', color: '#F59E0B' },
-        { name: 'SOC Foundations', desc: 'Remember log fields and investigation questions', color: '#8B5CF6' },
-        { name: 'Windows Basics', desc: 'Remember Event Viewer, services, users/groups', color: '#EC4899' }
-    ];
-
-    for (const deck of starterDecks) {
-        try {
-            await db.runAsync(
-                `INSERT OR IGNORE INTO decks (name, description, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?);`,
-                [deck.name, deck.desc, deck.color, now, now]
-            );
-        } catch (e) {
-            console.error(`Error seeding deck: ${deck.name}`, e);
-        }
-    }
-}
-
-// DECK CRUD
-export async function getAllDecks() {
+// --- CRUD / FETCH OPERATIONS ---
+export async function getAllDecks(): Promise<DbDeck[]> {
     const db = await getReadyDatabase();
-    return await db.getAllAsync<DbDeck>('SELECT * FROM decks ORDER BY name ASC;');
+    return db.getAllAsync<DbDeck>('SELECT * FROM decks ORDER BY id ASC;');
 }
 
-export async function createDeck(name: string, description: string = '', color: string = '#2563EB') {
+export async function createDeck(name: string, description: string | null, color: string | null): Promise<void> {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
-    await db.runAsync(
-        'INSERT INTO decks (name, description, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?);',
-        [name.trim(), description.trim(), color, now, now]
-    );
+    await db.runAsync('INSERT INTO decks (name, description, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?);', [name, description, color, now, now]);
 }
 
-// CARD CRUD
-export async function saveCard(deckId: number, cardType: string, front: string, back: string, tags: string = '', notes: string = '') {
+export async function updateDeck(id: number, name: string, description: string | null): Promise<void> {
+    const db = await getReadyDatabase();
+    const now = new Date().toISOString();
+    await db.runAsync('UPDATE decks SET name = ?, description = ?, updated_at = ? WHERE id = ?;', [name, description, now, id]);
+}
+
+export async function deleteDeck(id: number): Promise<void> {
+    const db = await getReadyDatabase();
+    await db.runAsync('DELETE FROM decks WHERE id = ?;', [id]);
+}
+
+export async function getAllCards(): Promise<DbCard[]> {
+    const db = await getReadyDatabase();
+    return db.getAllAsync<DbCard>(`
+        SELECT c.*, d.name as deck_name 
+        FROM cards c 
+        JOIN decks d ON c.deck_id = d.id 
+        ORDER BY c.id DESC;
+    `);
+}
+
+export async function saveCard(deckId: number, cardType: string, front: string, back: string, tags: string | null, notes: string | null): Promise<void> {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
     await db.runAsync(
-        `INSERT INTO cards (deck_id, card_type, front, back, tags, notes, difficulty, due_at, interval_days, review_count, lapse_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'new', ?, 0, 0, 0, ?, ?);`,
-        [deckId, cardType, front.trim(), back.trim(), tags.trim(), notes.trim(), now, now, now]
+        'INSERT INTO cards (deck_id, card_type, front, back, tags, notes, difficulty, due_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
+        [deckId, cardType, front, back, tags, notes, 'new', now, now, now]
     );
 }
 
-export async function updateCard(id: number, deckId: number, cardType: string, front: string, back: string, tags: string, notes: string) {
+export async function updateCard(id: number, deckId: number, cardType: string, front: string, back: string, tags: string | null, notes: string | null): Promise<void> {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
     await db.runAsync(
-        `UPDATE cards SET deck_id = ?, card_type = ?, front = ?, back = ?, tags = ?, notes = ?, updated_at = ? WHERE id = ?;`,
-        [deckId, cardType, front.trim(), back.trim(), tags.trim(), notes.trim(), now, id]
+        'UPDATE cards SET deck_id = ?, card_type = ?, front = ?, back = ?, tags = ?, notes = ?, updated_at = ? WHERE id = ?;',
+        [deckId, cardType, front, back, tags, notes, now, id]
     );
 }
 
-export async function deleteCard(id: number) {
+export async function deleteCard(id: number): Promise<void> {
     const db = await getReadyDatabase();
     await db.runAsync('DELETE FROM cards WHERE id = ?;', [id]);
 }
 
-export async function getAllCards() {
-    const db = await getReadyDatabase();
-    return await db.getAllAsync<DbCard>(
-        'SELECT c.*, d.name AS deck_name FROM cards c JOIN decks d ON d.id = c.deck_id ORDER BY c.created_at DESC;'
-    );
-}
-
-// REVIEW SYSTEM OPERATIONS
-export async function getDueCards(limit: number = 30, deckIdFilter: string = 'All') {
+// --- OPTIMIZED QUEUE METHOD (SUPPORTS RE-VIEW OVERRIDE BYRASS) ---
+export async function getDueCards(limit: number = 30, deckFilter: string = 'All', isReViewMode: boolean = false): Promise<DbCard[]> {
     const db = await getReadyDatabase();
     const nowStr = new Date().toISOString();
 
-    let sql = `
-        SELECT c.*, d.name AS deck_name 
-        FROM cards c
-        JOIN decks d ON d.id = c.deck_id
-        WHERE (c.due_at IS NULL OR c.due_at <= ?)
+    let query = `
+        SELECT c.*, d.name as deck_name 
+        FROM cards c 
+        JOIN decks d ON c.deck_id = d.id
     `;
-    const params: any[] = [nowStr];
+    
+    const conditions: string[] = [];
+    const params: any[] = [];
 
-    if (deckIdFilter !== 'All') {
-        sql += ' AND c.deck_id = ?';
-        params.push(parseInt(deckIdFilter, 10));
+    // If Re-View is FALSE, strictly apply Spaced Repetition dates constraints
+    if (!isReViewMode) {
+        conditions.push('(c.due_at IS NULL OR c.due_at <= ?)');
+        params.push(nowStr);
     }
 
-    sql += ' ORDER BY c.due_at ASC, c.created_at ASC LIMIT ?;';
+    if (deckFilter !== 'All') {
+        conditions.push('c.deck_id = ?');
+        params.push(parseInt(deckFilter, 10));
+    }
+
+    if (conditions.length > 0) {
+        query += ' WHERE ' + conditions.join(' AND ');
+    }
+
+    // Shuffle the queue in Re-View Mode to offer a dynamic "Free Challenge" practice run!
+    if (isReViewMode) {
+        query += ' ORDER BY RANDOM()';
+    } else {
+        query += ' ORDER BY c.due_at ASC';
+    }
+
+    query += ' LIMIT ?;';
     params.push(limit);
 
-    return await db.getAllAsync<DbCard>(sql, params);
+    return db.getAllAsync<DbCard>(query, params);
 }
 
-export function calculateNextReview(currentInterval: number, rating: string) {
-    let interval = 0;
-    let daysToAdd = 0;
-    let lapseAdd = 0;
-    let difficulty = 'good';
+// --- LOGGING ENGINE EXTENSION ---
+export async function logReviewHistory(cardId: number, mode: 'srs' | 're-view', rating: string | null = null): Promise<void> {
+    const db = await getReadyDatabase();
+    const now = new Date().toISOString();
+    await db.runAsync('INSERT INTO review_logs (card_id, mode, rating, created_at) VALUES (?, ?, ?, ?);', [cardId, mode, rating, now]);
+}
+
+export async function rateCard(id: number, decision: 'again' | 'hard' | 'good' | 'easy'): Promise<void> {
+    const db = await getReadyDatabase();
     const now = new Date();
+    
+    const card = await db.getFirstAsync<DbCard>('SELECT * FROM cards WHERE id = ?;', [id]);
+    if (!card) return;
 
-    if (rating === 'Again') {
-        interval = 0;
-        daysToAdd = 0; 
-        lapseAdd = 1;
-        difficulty = 'again';
-    } else if (rating === 'Hard') {
-        interval = Math.max(1, Math.floor(currentInterval * 1.2));
-        daysToAdd = 1;
-        lapseAdd = 0;
-        difficulty = 'hard';
-    } else if (rating === 'Good') {
-        interval = currentInterval === 0 ? 3 : Math.ceil(currentInterval * 2.0);
-        daysToAdd = interval;
-        lapseAdd = 0;
-        difficulty = 'good';
-    } else if (rating === 'Easy') {
-        interval = currentInterval === 0 ? 7 : Math.ceil(currentInterval * 2.5);
-        daysToAdd = interval;
-        lapseAdd = 0;
-        difficulty = 'easy';
+    let nextInterval = card.interval_days;
+    let newDifficulty = decision;
+
+    if (decision === 'again') {
+        nextInterval = 0;
+    } else if (decision === 'hard') {
+        nextInterval = card.interval_days === 0 ? 1 : Math.round(card.interval_days * 1.2);
+    } else if (decision === 'good') {
+        nextInterval = card.interval_days === 0 ? 3 : Math.round(card.interval_days * 2.5);
+    } else if (decision === 'easy') {
+        nextInterval = card.interval_days === 0 ? 7 : Math.round(card.interval_days * 4.0);
     }
 
-    const targetDate = new Date(now.getTime());
-    if (daysToAdd === 0) {
-        targetDate.setMinutes(targetDate.getMinutes() + 5);
-    } else {
-        targetDate.setDate(targetDate.getDate() + daysToAdd);
-    }
-
-    return {
-        interval_days: interval,
-        due_at: targetDate.toISOString(),
-        lapseAdd,
-        difficulty
-    };
-}
-
-export async function rateCard(cardId: number, currentInterval: number, rating: string) {
-    const db = await getReadyDatabase();
-    const nowStr = new Date().toISOString();
-    const schedule = calculateNextReview(currentInterval, rating);
+    now.setDate(now.getDate() + nextInterval);
+    const nextDueStr = now.toISOString();
+    const tsStr = new Date().toISOString();
 
     await db.runAsync(
-        `UPDATE cards 
-         SET difficulty = ?, 
-             due_at = ?, 
-             interval_days = ?, 
-             review_count = review_count + 1, 
-             lapse_count = lapse_count + ?, 
-             updated_at = ?
-         WHERE id = ?;`,
-        [schedule.difficulty, schedule.due_at, schedule.interval_days, schedule.lapseAdd, nowStr, cardId]
+        'UPDATE cards SET difficulty = ?, due_at = ?, interval_days = ?, review_count = review_count + 1, updated_at = ? WHERE id = ?;',
+        [newDifficulty, nextDueStr, nextInterval, tsStr, id]
     );
 
-    await db.runAsync(
-        `INSERT INTO reviews (card_id, rating, reviewed_at, next_due_at) VALUES (?, ?, ?, ?);`,
-        [cardId, rating, nowStr, schedule.due_at]
-    );
+    // Save history point into our brand new analytics logging structure
+    await logReviewHistory(id, 'srs', decision);
 }
 
-// MISTAKE BANK OPERATIONS
-export async function getAllMistakes() {
+// --- MISTAKE BANK ENGINE ---
+export async function getAllMistakes(): Promise<DbMistake[]> {
     const db = await getReadyDatabase();
-    return await db.getAllAsync<DbMistake>('SELECT * FROM mistakes ORDER BY created_at DESC;');
+    return db.getAllAsync<DbMistake>('SELECT * FROM mistakes ORDER BY status DESC, id DESC;');
 }
 
-export async function addMistake(title: string, explanation: string = '', relatedCardId: number | null = null) {
+export async function addMistake(title: string, explanation: string | null, relatedCardId: number | null): Promise<void> {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
-    await db.runAsync(
-        'INSERT INTO mistakes (title, explanation, related_card_id, status, created_at, updated_at) VALUES (?, ?, ?, "open", ?, ?);',
-        [title.trim(), explanation.trim(), relatedCardId, now, now]
-    );
+    await db.runAsync('INSERT INTO mistakes (title, explanation, related_card_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);', [title, explanation, relatedCardId, 'open', now, now]);
 }
 
-export async function updateMistakeStatus(id: number, status: 'open' | 'resolved') {
+export async function updateMistakeStatus(id: number, status: 'open' | 'resolved'): Promise<void> {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
-    await db.runAsync(
-        'UPDATE mistakes SET status = ?, updated_at = ? WHERE id = ?;',
-        [status, now, id]
-    );
+    await db.runAsync('UPDATE mistakes SET status = ?, updated_at = ? WHERE id = ?;', [status, now, id]);
 }
 
-export async function deleteMistake(id: number) {
+export async function deleteMistake(id: number): Promise<void> {
     const db = await getReadyDatabase();
     await db.runAsync('DELETE FROM mistakes WHERE id = ?;', [id]);
 }
 
-// WIN LOG OPERATIONS
-export async function getAllWins() {
+// --- WIN LOG LOGIC ENGINE ---
+export async function getAllWins(): Promise<DbWin[]> {
     const db = await getReadyDatabase();
-    return await db.getAllAsync<DbWin>('SELECT * FROM wins ORDER BY created_at DESC;');
+    return db.getAllAsync<DbWin>('SELECT * FROM wins ORDER BY id DESC;');
 }
 
-export async function addWin(text: string) {
+export async function addWin(text: string): Promise<void> {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
-    await db.runAsync('INSERT INTO wins (text, created_at) VALUES (?, ?);', [text.trim(), now]);
+    await db.runAsync('INSERT INTO wins (text, created_at) VALUES (?, ?);', [text, now]);
 }
 
-export async function deleteWin(id: number) {
+export async function deleteWin(id: number): Promise<void> {
     const db = await getReadyDatabase();
     await db.runAsync('DELETE FROM wins WHERE id = ?;', [id]);
 }
 
-// SETTINGS KEY-VALUE ACCESSORS
-export async function getSetting(key: string) {
+export async function getCardCount(): Promise<number> {
     const db = await getReadyDatabase();
-    const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM settings WHERE key = ?;', [key]);
-    return row?.value ?? null;
+    const result = await db.getFirstAsync<{ total: number }>('SELECT COUNT(*) as total FROM cards;');
+    return result?.total ?? 0;
 }
 
-export async function updateSetting(key: string, value: string) {
+export async function getTotalReviews(): Promise<number> {
     const db = await getReadyDatabase();
-    await db.runAsync('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?);', [key, value]);
-}
-
-// COUNTER UTILITIES
-export async function getCardCount() {
-    const db = await getReadyDatabase();
-    // INNER JOIN with decks ensures we ONLY count cards whose parent decks actively exist
-    const result = await db.getFirstAsync<{ count: number }>(
-        'SELECT COUNT(c.id) as count FROM cards c JOIN decks d ON c.deck_id = d.id;'
-    );
-    return result?.count ?? 0;
-}
-
-export async function getTotalReviews() {
-    const db = await getReadyDatabase();
-    const result = await db.getFirstAsync<{ total: number }>('SELECT COUNT(*) as total FROM reviews;');
+    const result = await db.getFirstAsync<{ total: number }>('SELECT COUNT(*) as total FROM review_logs;');
     return result?.total ?? 0;
 }
 
@@ -384,13 +347,11 @@ export async function getHomeSummaryStats() {
     const db = await getReadyDatabase();
     const nowStr = new Date().toISOString();
 
-    // Calculate due cards only for decks that exist right now
-    const dueResult = await db.getFirstAsync<{ count: number }>(
+    const dueResult = await db.getFirstAsync<{ count: number }> (
         'SELECT COUNT(c.id) as count FROM cards c JOIN decks d ON c.deck_id = d.id WHERE (c.due_at IS NULL OR c.due_at <= ?);', 
         [nowStr]
     );
 
-    // Calculate new cards only for decks that exist right now
     const newResult = await db.getFirstAsync<{ count: number }>(
         "SELECT COUNT(c.id) as count FROM cards c JOIN decks d ON c.deck_id = d.id WHERE c.difficulty = 'new';"
     );
@@ -410,8 +371,9 @@ export async function exportDatabaseToBackupObject() {
     const db = await getReadyDatabase();
     const decks = await db.getAllAsync('SELECT * FROM decks;');
     const cards = await db.getAllAsync('SELECT * FROM cards;');
-    const reviews = await db.getAllAsync('SELECT * FROM reviews;');
     const mistakes = await db.getAllAsync('SELECT * FROM mistakes;');
     const wins = await db.getAllAsync('SELECT * FROM wins;');
-    return { version: 1, exported_at: new Date().toISOString(), decks, cards, reviews, mistakes, wins };
+    const reviewLogs = await db.getAllAsync('SELECT * FROM review_logs;');
+
+    return { version: 1, decks, cards, mistakes, wins, reviewLogs };
 }

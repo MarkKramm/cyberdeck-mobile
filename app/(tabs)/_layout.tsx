@@ -1,70 +1,97 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Tabs } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { DeviceEventEmitter, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import PagerView from 'react-native-pager-view';
 
-import { HapticTab } from '@/components/haptic-tab';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+// Import your exact screen components safely
+import AddScreen from './add';
+import BrowseScreen from './browse';
+import HomeScreen from './index';
+import MoreScreen from './more';
+import ReviewScreen from './review';
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
+  const [activeIndex, setActiveIndex] = useState(0);
+  const pagerRef = useRef<PagerView>(null);
+
+  function handleTabPress(index: number) {
+    setActiveIndex(index);
+    pagerRef.current?.setPage(index);
+  }
+
+  function handlePageSelect(e: any) {
+    setActiveIndex(e.nativeEvent.position);
+  }
+
+  useEffect(() => {
+    const tabSubscription = DeviceEventEmitter.addListener('switchTabSignal', (targetIndex: number) => {
+      handleTabPress(targetIndex);
+    });
+    return () => tabSubscription.remove();
+  }, []);
 
   return (
-    <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home" size={size} color={color} />
-          ),
-        }}
-      />
+    <View style={styles.container}>
+      {/* PASSES THE DYNAMIC isFocused PROP TO RE-TRIGGER DATA LOADING HOOKS ON SWIPE */}
+      <PagerView
+        ref={pagerRef}
+        style={styles.pagerView}
+        initialPage={0}
+        onPageSelected={handlePageSelect}
+      >
+        <View key="1" style={styles.pageWrapper}><HomeScreen isFocused={activeIndex === 0} /></View>
+        <View key="2" style={styles.pageWrapper}><ReviewScreen isFocused={activeIndex === 1} /></View>
+        <View key="3" style={styles.pageWrapper}><AddScreen isFocused={activeIndex === 2} /></View>
+        <View key="4" style={styles.pageWrapper}><BrowseScreen isFocused={activeIndex === 3} /></View>
+        <View key="5" style={styles.pageWrapper}><MoreScreen /></View>
+      </PagerView>
 
-      <Tabs.Screen
-        name="review"
-        options={{
-          title: 'Review',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="book" size={size} color={color} />
-          ),
-        }}
-      />
+      <View style={styles.tabBarContainer}>
+        <TouchableOpacity style={styles.tabButton} onPress={() => handleTabPress(0)}>
+          <Ionicons name="home" size={24} color={activeIndex === 0 ? '#2563EB' : '#9CA3AF'} />
+          <Text style={[styles.tabLabel, activeIndex === 0 && styles.activeTabLabel]}>Home</Text>
+        </TouchableOpacity>
 
-      <Tabs.Screen
-        name="add"
-        options={{
-          title: 'Add',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle" size={size} color={color} />
-          ),
-        }}
-      />
+        <TouchableOpacity style={styles.tabButton} onPress={() => handleTabPress(1)}>
+          <Ionicons name="book" size={24} color={activeIndex === 1 ? '#2563EB' : '#9CA3AF'} />
+          <Text style={[styles.tabLabel, activeIndex === 1 && styles.activeTabLabel]}>Review</Text>
+        </TouchableOpacity>
 
-      <Tabs.Screen
-        name="browse"
-        options={{
-          title: 'Browse',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="search" size={size} color={color} />
-          ),
-        }}
-      />
+        <TouchableOpacity style={styles.tabButton} onPress={() => handleTabPress(2)}>
+          <Ionicons name="add-circle" size={24} color={activeIndex === 2 ? '#2563EB' : '#9CA3AF'} />
+          <Text style={[styles.tabLabel, activeIndex === 2 && styles.activeTabLabel]}>Add</Text>
+        </TouchableOpacity>
 
-      <Tabs.Screen
-        name="more"
-        options={{
-          title: 'More',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="ellipsis-horizontal-circle" size={size} color={color} />
-          ),
-        }}
-      />
-    </Tabs>
+        <TouchableOpacity style={styles.tabButton} onPress={() => handleTabPress(3)}>
+          <Ionicons name="search" size={24} color={activeIndex === 3 ? '#2563EB' : '#9CA3AF'} />
+          <Text style={[styles.tabLabel, activeIndex === 3 && styles.activeTabLabel]}>Browse</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.tabButton} onPress={() => handleTabPress(4)}>
+          <Ionicons name="ellipsis-horizontal" size={24} color={activeIndex === 4 ? '#2563EB' : '#9CA3AF'} />
+          <Text style={[styles.tabLabel, activeIndex === 4 && styles.activeTabLabel]}>More</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#111827' },
+  pagerView: { flex: 1 },
+  pageWrapper: { flex: 1 },
+  tabBarContainer: {
+    flexDirection: 'row',
+    height: Platform.OS === 'ios' ? 88 : 68,
+    backgroundColor: '#1F2937',
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+  },
+  tabButton: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+  tabLabel: { fontSize: 11, fontWeight: '600', color: '#9CA3AF', marginTop: 4 },
+  activeTabLabel: { color: '#2563EB' },
+});

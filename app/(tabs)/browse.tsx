@@ -1,8 +1,8 @@
 import { DbCard, DbDeck, deleteCard, getAllCards, getAllDecks, openDatabase, updateCard } from '@/src/database';
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   Modal,
   ScrollView,
   StyleSheet,
@@ -24,13 +24,12 @@ const CARD_TYPES = [
   'Interview'
 ];
 
-export default function BrowseScreen() {
+export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
   const [cards, setCards] = useState<DbCard[]>([]);
   const [decks, setDecks] = useState<DbDeck[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
   const [searchText, setSearchText] = useState('');
 
-  // Editing modal form bindings
   const [editingCard, setEditingCard] = useState<DbCard | null>(null);
   const [editDeckId, setEditDeckId] = useState<number>(0);
   const [editCardType, setEditCardType] = useState('Definition');
@@ -38,6 +37,10 @@ export default function BrowseScreen() {
   const [editBack, setEditBack] = useState('');
   const [editTags, setEditTags] = useState('');
   const [editNotes, setEditNotes] = useState('');
+
+  const [isEditingDeck, setIsEditingDeck] = useState(false);
+  const [deckFormName, setDeckFormName] = useState('');
+  const [deckFormDesc, setDeckFormDesc] = useState('');
 
   const isSearching = searchText.trim().length > 0;
 
@@ -52,11 +55,12 @@ export default function BrowseScreen() {
     }
   }
 
-  useFocusEffect(
-    useCallback(() => {
+  // BUG FIX: Forces Browse rows to pull freshly from SQLite on active focus
+  useEffect(() => {
+    if (isFocused) {
       loadData();
-    }, [selectedDeckId])
-  );
+    }
+  }, [isFocused, selectedDeckId]);
 
   const searchedCards = useMemo(() => {
     const cleanSearch = searchText.trim().toLowerCase();
@@ -90,6 +94,38 @@ export default function BrowseScreen() {
 
   const visibleCards = selectedDeckId === null ? [] : groupedCards[selectedDeckId] ?? [];
 
+  const selectedDeckObj = decks.find(d => d.id === selectedDeckId);
+
+  function openDeckEdit() {
+    if (!selectedDeckObj) return;
+    setDeckFormName(selectedDeckObj.name);
+    setDeckFormDesc(selectedDeckObj.description || '');
+    setIsEditingDeck(true);
+  }
+
+  async function saveDeckEdit() {
+    if (!deckFormName.trim()) {
+      Alert.alert('Missing Name', 'The deck must have a valid title.');
+      return;
+    }
+    if (!selectedDeckId) return;
+
+    try {
+      const db = await openDatabase();
+      await db.runAsync(
+        'UPDATE decks SET name = ?, description = ?, updated_at = ? WHERE id = ?;',
+        [deckFormName.trim(), deckFormDesc.trim(), new Date().toISOString(), selectedDeckId]
+      );
+      
+      setIsEditingDeck(false);
+      await loadData();
+      Alert.alert('Success', 'Deck properties modified securely.');
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Could not overwrite deck metadata profile rules.');
+    }
+  }
+
   function openEdit(card: DbCard) {
     setEditingCard(card);
     setEditDeckId(card.deck_id);
@@ -110,8 +146,8 @@ export default function BrowseScreen() {
 
     try {
       await updateCard(
-        editingCard.id,
-        editDeckId,
+        Number(editingCard.id),
+        Number(editDeckId),
         editCardType,
         editFront.trim(),
         editBack.trim(),
@@ -119,6 +155,7 @@ export default function BrowseScreen() {
         editNotes.trim()
       );
 
+      Keyboard.dismiss();
       setEditingCard(null);
       await loadData();
       Alert.alert('Updated', 'Card updates written successfully.');
@@ -135,7 +172,7 @@ export default function BrowseScreen() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
-          await deleteCard(cardId);
+          await deleteCard(Number(cardId));
           await loadData();
         },
       },
@@ -164,8 +201,9 @@ export default function BrowseScreen() {
   }
 
   function renderCard(card: DbCard) {
+    const targetCardId = card.id;
     return (
-      <View key={card.id} style={styles.cardBox}>
+      <View key={targetCardId} style={styles.cardBox}>
         <View style={styles.cardHeaderRow}>
           <Text style={styles.categoryLabel}>📁 {card.deck_name || 'Unknown'}</Text>
           <Text style={styles.typeBadge}>{card.card_type}</Text>
@@ -179,15 +217,13 @@ export default function BrowseScreen() {
           <TouchableOpacity style={styles.editButton} onPress={() => openEdit(card)}>
             <Text style={styles.actionButtonText}>Edit</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.deleteButton} onPress={() => confirmDelete(card.id)}>
+          <TouchableOpacity style={styles.deleteButton} onPress={() => confirmDelete(targetCardId)}>
             <Text style={styles.actionButtonText}>Delete</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   }
-
-  const selectedDeckObj = decks.find(d => d.id === selectedDeckId);
 
   return (
     <View style={styles.container}>
@@ -225,7 +261,7 @@ export default function BrowseScreen() {
             <Text style={styles.emptyHint}>No categories initialized yet.</Text>
           </View>
         ) : isSearching ? (
-          <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
             {searchedCards.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Text style={styles.subtitle}>No matching artifacts</Text>
@@ -235,14 +271,14 @@ export default function BrowseScreen() {
             )}
           </ScrollView>
         ) : selectedDeckId === null ? (
-          <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
             {decks.map((deck) => {
               const count = groupedCards[deck.id]?.length || 0;
               return (
                 <TouchableOpacity
                   key={deck.id}
                   style={[styles.folderBox, { borderLeftColor: deck.color || '#3B82F6' }]}
-                  onPress={() => setSelectedDeckId(deck.id)}
+                  onPress={() => setSelectedDeckId(Number(deck.id))}
                 >
                   <Text style={styles.folderTitle}>📁 {deck.name}</Text>
                   {deck.description ? <Text style={styles.folderDescription}>{deck.description}</Text> : null}
@@ -258,12 +294,17 @@ export default function BrowseScreen() {
                 <Text style={styles.backButtonText}>← Return</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.deleteDeckActionButton} onPress={() => confirmDeleteDeck(selectedDeckObj!.id, selectedDeckObj!.name)}>
-                <Text style={styles.deleteDeckActionText}>🗑 Delete Deck</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity style={styles.editDeckActionButton} onPress={openDeckEdit}>
+                  <Text style={styles.editDeckActionText}>✏️ Edit Deck</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.deleteDeckActionButton} onPress={() => confirmDeleteDeck(selectedDeckObj!.id, selectedDeckObj!.name)}>
+                  <Text style={styles.deleteDeckActionText}>🗑 Delete</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
-            <ScrollView style={styles.scrollArea} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
               {visibleCards.length === 0 ? (
                 <View style={styles.emptyBox}>
                   <Text style={styles.subtitle}>No contents</Text>
@@ -279,11 +320,11 @@ export default function BrowseScreen() {
 
       <Modal visible={editingCard !== null} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <ScrollView style={styles.modalScrollBox}>
+          <ScrollView style={styles.modalScrollBox} keyboardShouldPersistTaps="always">
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>Modify Card Specs</Text>
 
-              <Text style={styles.label}>Parent Deck Allocation</Text>
+              <Text style={styles.subLabel}>Parent Deck Allocation</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalSelectorRow}>
                 {decks.map((d) => (
                   <TouchableOpacity
@@ -292,14 +333,14 @@ export default function BrowseScreen() {
                       styles.selectorOptionButton,
                       editDeckId === d.id && { backgroundColor: d.color || '#2563EB', borderColor: '#FFF' }
                     ]}
-                    onPress={() => setEditDeckId(d.id)}
+                    onPress={() => setEditDeckId(Number(d.id))}
                   >
                     <Text style={styles.selectorOptionButtonText}>📁 {d.name}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
 
-              <Text style={styles.label}>Card Context Type</Text>
+              <Text style={styles.subLabel}>Card Context Type</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalSelectorRow}>
                 {CARD_TYPES.map((t) => (
                   <TouchableOpacity
@@ -312,16 +353,16 @@ export default function BrowseScreen() {
                 ))}
               </ScrollView>
 
-              <Text style={styles.label}>Front (Concept)</Text>
+              <Text style={styles.subLabel}>Front (Concept)</Text>
               <TextInput style={styles.input} value={editFront} onChangeText={setEditFront} multiline />
 
-              <Text style={styles.label}>Back (Logic Engine)</Text>
+              <Text style={styles.subLabel}>Back (Logic Engine)</Text>
               <TextInput style={[styles.input, styles.answerInput]} value={editBack} onChangeText={setEditBack} multiline />
 
-              <Text style={styles.label}>Metadata Tags</Text>
+              <Text style={styles.subLabel}>Metadata Tags</Text>
               <TextInput style={styles.input} value={editTags} onChangeText={setEditTags} autoCapitalize="none" />
 
-              <Text style={styles.label}>Context Reference Notes</Text>
+              <Text style={styles.subLabel}>Context Reference Notes</Text>
               <TextInput style={styles.input} value={editNotes} onChangeText={setEditNotes} multiline />
 
               <TouchableOpacity style={styles.saveButton} onPress={saveEdit}>
@@ -334,23 +375,40 @@ export default function BrowseScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      <Modal visible={isEditingDeck} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Modify Deck Specs</Text>
+            
+            <Text style={styles.subLabel}>Deck Title</Text>
+            <TextInput style={styles.input} value={deckFormName} onChangeText={setDeckFormName} placeholder="Deck name..." placeholderTextColor="#6B7280" />
+
+            <Text style={styles.subLabel}>Description (Optional)</Text>
+            <TextInput style={styles.input} value={deckFormDesc} onChangeText={setDeckFormDesc} placeholder="What are you studying here?" placeholderTextColor="#6B7280" multiline />
+
+            <TouchableOpacity style={[styles.saveButton, { backgroundColor: '#10B981' }]} onPress={saveDeckEdit}>
+              <Text style={styles.actionButtonText}>Save Deck Profile</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={() => setIsEditingDeck(false)}>
+              <Text style={styles.actionButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#111827',
-    paddingHorizontal: 24,
-    paddingTop: 64, // Pushes header down away from the status bar
-  },
-  contentBox: { width: '100%', maxHeight: '100%' },
+  container: { flex: 1, backgroundColor: '#111827', paddingHorizontal: 24, paddingTop: 64 },
+  contentBox: { width: '100%', height: '100%' },
   title: { fontSize: 34, fontWeight: 'bold', color: 'white', textAlign: 'center', marginBottom: 18 },
   searchInput: { backgroundColor: '#1F2937', color: 'white', borderRadius: 14, padding: 14, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#374151' },
   clearSearchButton: { alignItems: 'center', marginBottom: 12 },
   clearSearchText: { color: '#3B82F6', fontWeight: '600' },
-  scrollArea: { width: '100%', marginBottom: 80 },
+  scrollArea: { flex: 1 },
+  scrollContent: { paddingBottom: 160 },
   folderBox: { backgroundColor: '#1F2937', padding: 18, borderRadius: 16, marginBottom: 12, borderLeftWidth: 6, borderWidth: 1, borderColor: '#374151' },
   folderTitle: { color: 'white', fontSize: 20, fontWeight: 'bold' },
   folderDescription: { color: '#9CA3AF', fontSize: 13, marginTop: 4 },
@@ -361,6 +419,8 @@ const styles = StyleSheet.create({
   deckControlHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   backButton: { paddingVertical: 6, paddingHorizontal: 12 },
   backButtonText: { color: '#3B82F6', fontSize: 16, fontWeight: '600' },
+  editDeckActionButton: { backgroundColor: '#374151', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#4B5563' },
+  editDeckActionText: { color: '#E5E7EB', fontSize: 12, fontWeight: '700' },
   deleteDeckActionButton: { backgroundColor: '#7F1D1D', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8 },
   deleteDeckActionText: { color: '#FCA5A5', fontSize: 12, fontWeight: '700' },
   cardBox: { backgroundColor: '#1F2937', padding: 16, borderRadius: 14, marginBottom: 12, borderWidth: 1, borderColor: '#374151' },
@@ -383,6 +443,7 @@ const styles = StyleSheet.create({
   selectorOptionButton: { backgroundColor: '#111827', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, marginRight: 6, borderWidth: 1, borderColor: '#374151' },
   activeTypeOptionButton: { backgroundColor: '#2563EB', borderColor: '#3B82F6' },
   selectorOptionButtonText: { color: 'white', fontSize: 13, fontWeight: '600' },
+  subLabel: { color: '#9CA3AF', marginBottom: 8, fontSize: 13, fontWeight: '600', textTransform: 'uppercase' },
   input: { backgroundColor: '#111827', color: 'white', borderRadius: 12, padding: 12, marginBottom: 16, fontSize: 15, borderWidth: 1, borderColor: '#374151' },
   answerInput: { minHeight: 80, textAlignVertical: 'top' },
   saveButton: { backgroundColor: '#2563EB', paddingVertical: 14, borderRadius: 12, marginBottom: 10, alignItems: 'center' },

@@ -1,6 +1,5 @@
 import { createDeck, getAllDecks, saveCard } from '@/src/database';
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     Alert,
     Keyboard,
@@ -27,7 +26,7 @@ const CARD_TYPES = [
 
 const DECK_COLORS = ['#2563EB', '#10B981', '#EF4444', '#F59E0B', '#8B5CF6', '#EC4899', '#6B7280'];
 
-export default function AddScreen() {
+export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
     const [decks, setDecks] = useState<any[]>([]);
     const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
     const [selectedType, setSelectedType] = useState('Definition');
@@ -37,7 +36,6 @@ export default function AddScreen() {
     const [tags, setTags] = useState('');
     const [notes, setNotes] = useState('');
 
-    // Custom deck creation modal states
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [newDeckName, setNewDeckName] = useState('');
     const [newDeckDesc, setNewDeckDesc] = useState('');
@@ -47,22 +45,23 @@ export default function AddScreen() {
         try {
             const dbDecks = await getAllDecks();
             setDecks(dbDecks);
-
+            
             if (autoSelectId) {
-                setSelectedDeckId(autoSelectId);
-            } else if (dbDecks.length > 0 && !selectedDeckId) {
-                setSelectedDeckId(dbDecks[0].id);
+                setSelectedDeckId(Number(autoSelectId));
+            } else if (dbDecks.length > 0 && selectedDeckId === null) {
+                setSelectedDeckId(Number(dbDecks[0].id));
             }
         } catch (e) {
             console.error(e);
         }
     }, [selectedDeckId]);
 
-    useFocusEffect(
-        useCallback(() => {
+    // BUG FIX: Refreshes selectors when the card insertion tab is swiped active
+    useEffect(() => {
+        if (isFocused) {
             loadDecks();
-        }, [loadDecks])
-    );
+        }
+  }, [isFocused, loadDecks]);
 
     async function handleCreateCustomDeck() {
         if (!newDeckName.trim()) {
@@ -71,7 +70,6 @@ export default function AddScreen() {
         }
 
         try {
-            // Force unique constraint check safely
             const currentDecks = await getAllDecks();
             if (currentDecks.some(d => d.name.toLowerCase() === newDeckName.trim().toLowerCase())) {
                 Alert.alert('Naming Conflict', 'A deck with that title already exists in your vault.');
@@ -79,21 +77,21 @@ export default function AddScreen() {
             }
 
             await createDeck(newDeckName.trim(), newDeckDesc.trim(), newDeckColor);
-
+            
             const updatedDecks = await getAllDecks();
             const newlyCreated = updatedDecks.find(d => d.name.toLowerCase() === newDeckName.trim().toLowerCase());
-
+            
             setNewDeckName('');
             setNewDeckDesc('');
             setIsModalVisible(false);
-
+            
             if (newlyCreated) {
-                setSelectedDeckId(newlyCreated.id);
                 setDecks(updatedDecks);
+                setSelectedDeckId(Number(newlyCreated.id));
             } else {
                 await loadDecks();
             }
-
+            
             Alert.alert('Deck Forged ✓', 'Your custom category is live.');
         } catch (error) {
             Alert.alert('System Error', 'Could not register custom deck layout.');
@@ -105,7 +103,7 @@ export default function AddScreen() {
             Alert.alert('System Missing Deck', 'Please select or create a deck first.');
             return;
         }
-
+        
         if (!front.trim() || !back.trim()) {
             Alert.alert('Missing Info', 'Please add both a question (Front) and an answer (Back).');
             return;
@@ -135,7 +133,7 @@ export default function AddScreen() {
     }
 
     return (
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <ScrollView style={{ flex: 1, backgroundColor: '#111827' }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="always">
             <View style={styles.formBox}>
                 <Text style={styles.title}>Forge Card</Text>
 
@@ -154,7 +152,7 @@ export default function AddScreen() {
                                 styles.selectorItem,
                                 selectedDeckId === deck.id && { backgroundColor: deck.color || '#2563EB', borderColor: '#FFFFFF' }
                             ]}
-                            onPress={() => setSelectedDeckId(deck.id)}
+                            onPress={() => setSelectedDeckId(Number(deck.id))}
                         >
                             <Text style={styles.selectorText}>📁 {deck.name}</Text>
                         </TouchableOpacity>
@@ -226,20 +224,20 @@ export default function AddScreen() {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalBox}>
                         <Text style={styles.modalTitle}>Create Custom Deck</Text>
-
+                        
                         <Text style={styles.modalLabel}>Deck Name</Text>
-                        <TextInput
-                            style={styles.modalInput}
-                            placeholder="e.g., Spanish Vocab, Medical Terms"
+                        <TextInput 
+                            style={styles.modalInput} 
+                            placeholder="e.g., Spanish Vocab" 
                             placeholderTextColor="#6B7280"
                             value={newDeckName}
                             onChangeText={setNewDeckName}
                         />
 
                         <Text style={styles.modalLabel}>Description (Optional)</Text>
-                        <TextInput
-                            style={styles.modalInput}
-                            placeholder="What are you studying here?"
+                        <TextInput 
+                            style={styles.modalInput} 
+                            placeholder="What are you studying here?" 
                             placeholderTextColor="#6B7280"
                             value={newDeckDesc}
                             onChangeText={setNewDeckDesc}
@@ -271,7 +269,7 @@ export default function AddScreen() {
 }
 
 const styles = StyleSheet.create({
-    container: { flexGrow: 1, backgroundColor: '#111827', padding: 24, justifyContent: 'center' },
+    container: { padding: 24, paddingTop: 64, justifyContent: 'center' },
     formBox: { width: '100%' },
     title: { fontSize: 34, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 28, textAlign: 'center', letterSpacing: 0.5 },
     headerLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },

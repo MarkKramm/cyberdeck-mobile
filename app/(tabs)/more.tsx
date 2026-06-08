@@ -15,6 +15,8 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Alert,
+  Keyboard,
+  Platform,
   ScrollView,
   Share,
   StyleSheet,
@@ -24,7 +26,10 @@ import {
   View
 } from 'react-native';
 
-export default function MoreScreen() {
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+
+export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
   const [activeTab, setActiveTab] = useState<'mistakes' | 'wins' | 'backup'>('mistakes');
   
   const [mistakes, setMistakes] = useState<DbMistake[]>([]);
@@ -33,7 +38,6 @@ export default function MoreScreen() {
   const [mistakeTitle, setMistakeTitle] = useState('');
   const [mistakeExplanation, setMistakeExplanation] = useState('');
   const [winText, setWinText] = useState('');
-  const [jsonInput, setJsonInput] = useState('');
 
   async function loadData() {
     try {
@@ -45,7 +49,7 @@ export default function MoreScreen() {
         setWins(data);
       }
     } catch (e) {
-      console.error('Error fetching auxiliary system datasets:', e);
+      console.error('Error fetching data:', e);
     }
   }
 
@@ -55,15 +59,16 @@ export default function MoreScreen() {
     }, [activeTab])
   );
 
-  // MISTAKE LOGIC HANDLERS
+  // MISTAKE HANDLERS
   async function handleAddMistake() {
     if (!mistakeTitle.trim()) {
-      Alert.alert('Missing Entry', 'Please identify the concept or error causing confusion.');
+      Alert.alert('Missing Entry', 'Please identify the concept causing confusion.');
       return;
     }
     await addMistake(mistakeTitle.trim(), mistakeExplanation.trim(), null);
     setMistakeTitle('');
     setMistakeExplanation('');
+    Keyboard.dismiss();
     await loadData();
     Alert.alert('Logged', 'Confusion captured.');
   }
@@ -84,14 +89,15 @@ export default function MoreScreen() {
     ]);
   }
 
-  // WIN LOG LOGIC HANDLERS
+  // WIN HANDLERS
   async function handleAddWin() {
     if (!winText.trim()) {
-      Alert.alert('Blank Win', 'Capture your milestone. Small progress still counts.');
+      Alert.alert('Blank Win', 'Capture your milestone.');
       return;
     }
     await addWin(winText.trim());
     setWinText('');
+    Keyboard.dismiss();
     await loadData();
     Alert.alert('Saved ✓', 'Victory permanently logged.');
   }
@@ -106,58 +112,88 @@ export default function MoreScreen() {
     ]);
   }
 
-  // DATA BACKUP & EXPORT SPECIFICATIONS
+  // EXPORT FILE PIPELINE
   async function handleExportBackup() {
     try {
       const backupData = await exportDatabaseToBackupObject();
-      const jsonString = JSON.stringify(backupData, null, 2);
+      const stringifiedPayload = JSON.stringify(backupData, null, 2);
+      const fileUri = FileSystem.cacheDirectory + 'cyberdeck_backup.json';
       
-      await Share.share({
-        message: jsonString,
-        title: 'CyberDeck Backup Object Export'
-      });
+      await FileSystem.writeAsStringAsync(fileUri, stringifiedPayload);
+      
+      await Share.share(
+        Platform.OS === 'ios'
+          ? { url: fileUri }
+          : { title: 'CyberDeck System Backup Document', url: fileUri, message: 'Backup file generated.' }
+      );
     } catch (error) {
       console.error(error);
-      Alert.alert('Export Failure', 'Could not assemble data structures.');
+      Alert.alert('Export Failure', 'Could not assemble data files.');
     }
   }
 
-  async function handleImportBackup() {
-    if (!jsonInput.trim()) {
-      Alert.alert('Empty Input', 'Please paste a valid CyberDeck backup JSON text block.');
-      return;
-    }
-
+  // UPDATED PARSER: Safely handles review logs data structures during JSON imports
+  async function handleImportBackupFile() {
     try {
-      const parsed = JSON.parse(jsonInput.trim());
+      const selection = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true
+      });
+
+      if (selection.canceled || !selection.assets || selection.assets.length === 0) {
+        return;
+      }
+
+      const targetFileUri = selection.assets[0].uri;
+      const fileContentsStr = await FileSystem.readAsStringAsync(targetFileUri);
+      
+      if (!fileContentsStr) {
+        throw new Error('Selected backup file is empty.');
+      }
+
+      const parsed = JSON.parse(fileContentsStr);
       if (!parsed.decks || !parsed.cards) {
-        Alert.alert('Invalid Format', 'This configuration payload is missing essential card schema tables.');
+        Alert.alert('Invalid Format', 'This file is missing card database schemas.');
         return;
       }
 
       const db = await openDatabase();
       const now = new Date().toISOString();
 
-      // Safe relational insertion loop
+      // Wipe tables cleanly
+      await db.runAsync('DELETE FROM review_logs;');
+      await db.runAsync('DELETE FROM cards;');
+      await db.runAsync('DELETE FROM decks;');
+
       for (const d of parsed.decks) {
         await db.runAsync(
-          `INSERT OR IGNORE INTO decks (id, name, description, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);`,
+          `INSERT OR REPLACE INTO decks (id, name, description, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);`,
           [d.id, d.name, d.description, d.color, d.created_at || now, d.updated_at || now]
         );
       }
 
       for (const c of parsed.cards) {
         await db.runAsync(
-          `INSERT OR IGNORE INTO cards (id, deck_id, card_type, front, back, tags, notes, difficulty, due_at, interval_days, review_count, lapse_count, created_at, updated_at)
+          `INSERT OR REPLACE INTO cards (id, deck_id, card_type, front, back, tags, notes, difficulty, due_at, interval_days, review_count, lapse_count, created_at, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [c.id, c.deck_id, c.card_type, c.front, c.back, c.tags, c.notes, c.difficulty || 'new', c.due_at || now, c.interval_days || 0, c.review_count || 0, c.lapse_count || 0, c.created_at || now, c.updated_at || now]
         );
       }
 
-      setJsonInput('');
-      Alert.alert('Import Complete ✓', 'Your CyberVault datasets have merged successfully.');
+      // Safely import logs if they exist inside the payload file
+      if (parsed.reviewLogs && Array.isArray(parsed.reviewLogs)) {
+        for (const log of parsed.reviewLogs) {
+          await db.runAsync(
+            `INSERT OR REPLACE INTO review_logs (id, card_id, mode, rating, created_at) VALUES (?, ?, ?, ?, ?);`,
+            [log.id, log.card_id, log.mode, log.rating || null, log.created_at || now]
+          );
+        }
+      }
+
+      Alert.alert('Import Complete ✓', 'Your database datasets and history logs synchronized successfully.');
     } catch (e) {
-      Alert.alert('Parsing Error', 'Failed to compile raw text string into system objects. Check spacing constraints.');
+      console.error(e);
+      Alert.alert('Parsing Error', 'Failed to compile selected JSON file down to storage tables.');
     }
   }
 
@@ -165,7 +201,6 @@ export default function MoreScreen() {
     <View style={styles.container}>
       <Text style={styles.headerTitle}>Learning Support</Text>
       
-      {/* SEGMENTED SWITCH PANEL ROW */}
       <View style={styles.tabBarRow}>
         <TouchableOpacity style={[styles.tabButton, activeTab === 'mistakes' && styles.activeTabButton]} onPress={() => setActiveTab('mistakes')}>
           <Text style={[styles.tabButtonText, activeTab === 'mistakes' && styles.activeTabButtonText]}>⚠️ Mistakes</Text>
@@ -178,7 +213,7 @@ export default function MoreScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollWrapper} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scrollWrapper} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         {activeTab === 'mistakes' && (
           <View style={styles.sectionContainer}>
             <View style={styles.cardInputBox}>
@@ -226,24 +261,17 @@ export default function MoreScreen() {
           <View style={styles.sectionContainer}>
             <View style={styles.cardInputBox}>
               <Text style={styles.fieldLabel}>Secure Device Data Object</Text>
-              <Text style={styles.infoDescription}>Compile your decks, cards, mistake histories, and study trace matrices into an unencrypted copy-pasteable text string block.</Text>
+              <Text style={styles.infoDescription}>Compile your decks, cards, histories, and analytics metrics safely into a shareable offline configuration layout JSON backup.</Text>
               <TouchableOpacity style={[styles.actionButton, styles.backupExportButton]} onPress={handleExportBackup}>
-                <Text style={styles.actionButtonText}>📤 Export Data payload</Text>
+                <Text style={styles.actionButtonText}>📤 Export System Backup File (.json)</Text>
               </TouchableOpacity>
             </View>
 
             <View style={styles.cardInputBox}>
               <Text style={styles.fieldLabel}>Restore / Merge Dataset</Text>
-              <TextInput 
-                style={[styles.inputField, styles.areaInput, styles.jsonStringAreaInput]} 
-                placeholder="Paste backup string data block here..." 
-                placeholderTextColor="#6B7280" 
-                multiline 
-                value={jsonInput}
-                onChangeText={jsonInput => setJsonInput(jsonInput)}
-              />
-              <TouchableOpacity style={[styles.actionButton, styles.backupImportButton]} onPress={handleImportBackup}>
-                <Text style={styles.actionButtonText}>📥 Inject & Merge Database</Text>
+              <Text style={styles.infoDescription}>Select an existing `.json` backup file from your device files to restore tables straight into storage.</Text>
+              <TouchableOpacity style={[styles.actionButton, styles.backupImportButton]} onPress={handleImportBackupFile}>
+                <Text style={styles.actionButtonText}>📁 Choose Backup File Picker (.json)</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -262,13 +290,13 @@ const styles = StyleSheet.create({
   tabButtonText: { color: '#9CA3AF', fontWeight: '600', fontSize: 13 },
   activeTabButtonText: { color: '#FFFFFF' },
   scrollWrapper: { flex: 1 },
+  scrollContent: { paddingBottom: 150 },
   sectionContainer: { paddingBottom: 40 },
   cardInputBox: { backgroundColor: '#1F2937', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#374151', marginBottom: 20 },
   fieldLabel: { color: '#F3F4F6', fontSize: 14, fontWeight: '700', textTransform: 'uppercase', marginBottom: 12 },
   infoDescription: { color: '#9CA3AF', fontSize: 13, lineHeight: 18, marginBottom: 16 },
   inputField: { backgroundColor: '#111827', color: '#FFFFFF', borderRadius: 10, padding: 12, fontSize: 15, borderWidth: 1, borderColor: '#374151', marginBottom: 12 },
   areaInput: { minHeight: 64, textAlignVertical: 'top' },
-  jsonStringAreaInput: { minHeight: 110, fontSize: 12, fontFamily: 'monospace' },
   actionButton: { backgroundColor: '#EF4444', padding: 14, borderRadius: 10, alignItems: 'center' },
   winActionButton: { backgroundColor: '#10B981' },
   backupExportButton: { backgroundColor: '#2563EB' },
