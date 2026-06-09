@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 
 const CARD_TYPES = [
+    'Q&A',
     'Definition',
     'ELI5',
     'Abbreviation',
@@ -29,13 +30,14 @@ const DECK_COLORS = ['#2563EB', '#10B981', '#EF4444', '#F59E0B', '#8B5CF6', '#EC
 export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
     const [decks, setDecks] = useState<any[]>([]);
     const [selectedDeckId, setSelectedDeckId] = useState<number | null>(null);
-    const [selectedType, setSelectedType] = useState('Definition');
+    const [selectedType, setSelectedType] = useState('Q&A');
 
     const [front, setFront] = useState('');
     const [back, setBack] = useState('');
     const [tags, setTags] = useState('');
     const [notes, setNotes] = useState('');
 
+    const [isDeckPickerVisible, setIsDeckPickerVisible] = useState(false);
     const [isModalVisible, setIsModalVisible] = useState(false);
     const [newDeckName, setNewDeckName] = useState('');
     const [newDeckDesc, setNewDeckDesc] = useState('');
@@ -56,12 +58,11 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
         }
     }, [selectedDeckId]);
 
-    // BUG FIX: Refreshes selectors when the card insertion tab is swiped active
     useEffect(() => {
         if (isFocused) {
             loadDecks();
         }
-  }, [isFocused, loadDecks]);
+    }, [isFocused, loadDecks]);
 
     async function handleCreateCustomDeck() {
         if (!newDeckName.trim()) {
@@ -112,8 +113,7 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
         try {
             await saveCard(
                 Number(selectedDeckId),
-                selectedType,
-                front.trim(),
+                selectedType, front.trim(),
                 back.trim(),
                 tags.trim(),
                 notes.trim()
@@ -132,94 +132,150 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
         }
     }
 
+    const currentSelectedDeckObj = decks.find(d => d.id === selectedDeckId);
+    const displayedDeckName = currentSelectedDeckObj ? currentSelectedDeckObj.name : 'Select Destination Deck';
+    const dynamicTriggerBg = currentSelectedDeckObj ? (currentSelectedDeckObj.color || '#1F2937') : '#1F2937';
+
     return (
-        <ScrollView style={{ flex: 1, backgroundColor: '#111827' }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="always">
+        <ScrollView style={{ flex: 1, backgroundColor: '#111827' }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
             <View style={styles.formBox}>
                 <Text style={styles.title}>Forge Card</Text>
 
-                <View style={styles.headerLabelRow}>
-                    <Text style={styles.label}>Target Deck</Text>
-                    <TouchableOpacity style={styles.plusTriggerButton} onPress={() => setIsModalVisible(true)}>
-                        <Text style={styles.plusTriggerText}>➕ Custom Deck</Text>
+                {/* Target Deck Dropdown selection area block */}
+                <View style={styles.fieldWrapper}>
+                    <View style={styles.headerLabelRow}>
+                        <Text style={styles.label}>Target Deck</Text>
+                        <TouchableOpacity style={styles.plusTriggerButton} onPress={() => setIsModalVisible(true)}>
+                            <Text style={styles.plusTriggerText}>➕ Custom Deck</Text>
+                        </TouchableOpacity>
+                    </View>
+                    
+                    <TouchableOpacity 
+                        style={[
+                            styles.dropdownTrigger, 
+                            { backgroundColor: dynamicTriggerBg },
+                            selectedDeckId !== null && { borderColor: '#FFFFFF', borderWidth: 1.5 }
+                        ]} 
+                        onPress={() => setIsDeckPickerVisible(true)}
+                    >
+                        <Text style={styles.dropdownTriggerText} numberOfLines={1}>📁 {displayedDeckName}</Text>
+                        <Text style={styles.dropdownArrow}>▼</Text>
                     </TouchableOpacity>
                 </View>
 
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
-                    {decks.map((deck) => (
-                        <TouchableOpacity
-                            key={deck.id}
-                            style={[
-                                styles.selectorItem,
-                                selectedDeckId === deck.id && { backgroundColor: deck.color || '#2563EB', borderColor: '#FFFFFF' }
-                            ]}
-                            onPress={() => setSelectedDeckId(Number(deck.id))}
-                        >
-                            <Text style={styles.selectorText}>📁 {deck.name}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
+                {/* Vertical Deck Selection Menu Overlay Modal */}
+                <Modal transparent visible={isDeckPickerVisible} animationType="fade" onRequestClose={() => setIsDeckPickerVisible(false)}>
+                    <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsDeckPickerVisible(false)}>
+                        <View style={styles.modalContent}>
+                            <Text style={styles.modalTitle}>[ DESTINATION REGISTRY ]</Text>
+                            <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
+                                {decks.map((deck) => {
+                                    const isCurrentSelected = selectedDeckId === deck.id;
+                                    return (
+                                        <TouchableOpacity 
+                                            key={deck.id} 
+                                            style={[
+                                                styles.modalOption, 
+                                                isCurrentSelected && { backgroundColor: deck.color || '#2563EB', borderColor: '#FFFFFF', borderWidth: 1.5 }
+                                            ]} 
+                                            onPress={() => {
+                                                setSelectedDeckId(deck.id);
+                                                setIsDeckPickerVisible(false);
+                                            }}
+                                        >
+                                            <Text style={styles.modalOptionText}>📁 {deck.name}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
 
-                <Text style={styles.label}>Card Type</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll}>
-                    {CARD_TYPES.map((type) => (
-                        <TouchableOpacity
-                            key={type}
-                            style={[
-                                styles.selectorItem,
-                                selectedType === type && styles.activeTypeItem
-                            ]}
-                            onPress={() => setSelectedType(type)}
-                        >
-                            <Text style={styles.selectorText}>{type}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
+                {/* Processing Card Type Slider Area Block */}
+                <View style={styles.fieldWrapper}>
+                    <Text style={styles.label}>Card Type</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.selectorScroll} contentContainerStyle={{ paddingHorizontal: 2 }}>
+                        {CARD_TYPES.map((type) => {
+                            const isTypeActive = selectedType === type;
+                            return (
+                                <TouchableOpacity
+                                    key={type}
+                                    style={[
+                                        styles.selectorItem,
+                                        isTypeActive && { backgroundColor: dynamicTriggerBg, borderColor: '#FFFFFF', borderWidth: 1.2 }
+                                    ]}
+                                    onPress={() => setSelectedType(type)}
+                                >
+                                    <Text style={styles.selectorText}>{type}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
 
-                <Text style={styles.label}>Front (Question / Concept)</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="Enter concept query..."
-                    placeholderTextColor="#6B7280"
-                    value={front}
-                    onChangeText={setFront}
-                    multiline
-                />
+                {/* Core Context Input Payload Structures */}
+                <View style={styles.fieldWrapper}>
+                    <Text style={styles.label}>Front (Question / Concept)</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Enter concept query..."
+                        placeholderTextColor="#6B7280"
+                        value={front}
+                        onChangeText={setFront}
+                        multiline
+                    />
+                </View>
 
-                <Text style={styles.label}>Back (Answer / Core Logic)</Text>
-                <TextInput
-                    style={[styles.input, styles.answerInput]}
-                    placeholder="Enter explanatory answer logic..."
-                    placeholderTextColor="#6B7280"
-                    multiline
-                    value={back}
-                    onChangeText={setBack}
-                />
+                <View style={styles.fieldWrapper}>
+                    <Text style={styles.label}>Back (Answer / Core Logic)</Text>
+                    <TextInput
+                        style={[styles.input, styles.answerInput]}
+                        placeholder="Enter explanatory answer logic..."
+                        placeholderTextColor="#6B7280"
+                        multiline
+                        value={back}
+                        onChangeText={setBack}
+                    />
+                </View>
 
-                <Text style={styles.label}>Tags (Comma separated)</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="e.g., flashcard, notes"
-                    placeholderTextColor="#6B7280"
-                    value={tags}
-                    onChangeText={setTags}
-                    autoCapitalize="none"
-                />
+                <View style={styles.fieldWrapper}>
+                    <Text style={styles.label}>Tags (Comma separated)</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="e.g., flashcard, notes"
+                        placeholderTextColor="#6B7280"
+                        value={tags}
+                        onChangeText={setTags}
+                        autoCapitalize="none"
+                    />
+                </View>
 
-                <Text style={styles.label}>Context Notes (Optional)</Text>
-                <TextInput
-                    style={styles.input}
-                    placeholder="Enter optional hint context rules..."
-                    placeholderTextColor="#6B7280"
-                    value={notes}
-                    onChangeText={setNotes}
-                    multiline
-                />
+                <View style={styles.fieldWrapper}>
+                    <Text style={styles.label}>Context Notes (Optional)</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Enter optional hint context rules..."
+                        placeholderTextColor="#6B7280"
+                        value={notes}
+                        onChangeText={setNotes}
+                        multiline
+                    />
+                </View>
 
-                <TouchableOpacity style={styles.button} onPress={handleSaveCard}>
+                {/* Save Button with color sync mapping */}
+                <TouchableOpacity 
+                    style={[
+                        styles.button, 
+                        { backgroundColor: dynamicTriggerBg, borderColor: selectedDeckId !== null ? '#FFFFFF' : '#3B82F6' }
+                    ]} 
+                    onPress={handleSaveCard}
+                >
                     <Text style={styles.buttonText}>Save Card</Text>
                 </TouchableOpacity>
             </View>
 
+            {/* Custom Deck Initialization Modal Layout */}
             <Modal visible={isModalVisible} transparent animationType="slide">
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalBox}>
@@ -271,20 +327,37 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
 const styles = StyleSheet.create({
     container: { padding: 24, paddingTop: 64, justifyContent: 'center' },
     formBox: { width: '100%' },
-    title: { fontSize: 34, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 28, textAlign: 'center', letterSpacing: 0.5 },
+    title: { fontSize: 34, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 14, textAlign: 'center', letterSpacing: 0.5 },
+    
+    // Balanced Spacing constraints to pull Save button back up safely
+    fieldWrapper: { marginBottom: 13 },
     headerLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
     plusTriggerButton: { backgroundColor: '#1F2937', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#374151' },
     plusTriggerText: { color: '#60A5FA', fontSize: 12, fontWeight: '700' },
-    label: { color: '#9CA3AF', fontSize: 14, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
-    selectorScroll: { marginBottom: 20, flexDirection: 'row' },
-    selectorItem: { backgroundColor: '#1F2937', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#374151' },
-    activeTypeItem: { backgroundColor: '#2563EB', borderColor: '#3B82F6' },
-    selectorText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
-    input: { backgroundColor: '#1F2937', color: '#FFFFFF', borderRadius: 12, padding: 14, marginBottom: 20, borderWidth: 1, borderColor: '#374151', fontSize: 16 },
-    answerInput: { minHeight: 90, textAlignVertical: 'top' },
-    button: { backgroundColor: '#2563EB', padding: 18, borderRadius: 12, marginTop: 8, alignItems: 'center', borderWidth: 1, borderColor: '#3B82F6' },
-    buttonText: { color: '#FFFFFF', fontWeight: '600', fontSize: 18 },
+    label: { color: '#9CA3AF', fontSize: 14, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+    
+    // Dropdown Selection Trigger Design Specs
+    dropdownTrigger: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#374151' },
+    dropdownTriggerText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', flex: 1 },
+    dropdownArrow: { color: '#9CA3AF', fontSize: 12, marginLeft: 8 },
+    
+    // Dropdown Modal Subsystem Layout Architecture
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'center', padding: 24 },
+    modalContent: { width: '100%', backgroundColor: '#1F2937', borderRadius: 16, borderWidth: 1, borderColor: '#374151', padding: 16 },
+    modalOption: { backgroundColor: '#111827', padding: 14, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#374151' },
+    modalOptionText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', textShadowColor: 'rgba(0, 0, 0, 0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+
+    selectorScroll: { flexDirection: 'row' },
+    selectorItem: { backgroundColor: '#1F2937', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#374151', justifyContent: 'center' },
+    selectorText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
+    
+    // Restored deep layout terminal text boxes
+    input: { backgroundColor: '#1F2937', color: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#374151', fontSize: 16, textAlignVertical: 'center', textAlign: 'center' },
+    answerInput: { minHeight: 110 },
+    
+    button: { padding: 18, borderRadius: 12, marginTop: 8, alignItems: 'center', borderWidth: 1, borderBottomWidth: 1, borderBottomColor: '#FFFFFF' },
+    buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 18 },
+    
     modalBox: { backgroundColor: '#1F2937', borderRadius: 20, padding: 24, borderWidth: 1, borderColor: '#374151' },
     modalTitle: { color: '#FFFFFF', fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
     modalLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 },
@@ -294,6 +367,6 @@ const styles = StyleSheet.create({
     activeColorBubble: { borderColor: '#FFFFFF', transform: [{ scale: 1.15 }] },
     modalForgeButton: { backgroundColor: '#10B981', padding: 14, borderRadius: 12, alignItems: 'center', marginBottom: 10 },
     modalForgeButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
-    modalCancelButton: { backgroundColor: '#374151', padding: 14, borderRadius: 12, alignItems: 'center' },
-    modalCancelButtonText: { color: '#9CA3AF', fontWeight: '600', fontSize: 16 }
+    modalCancelButton: { backgroundColor: '#dd3434', padding: 14, borderRadius: 12, alignItems: 'center' },
+    modalCancelButtonText: { color: '#fff', fontWeight: '600', fontSize: 16 }
 });
