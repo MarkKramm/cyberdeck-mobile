@@ -39,6 +39,14 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
   const [mistakeExplanation, setMistakeExplanation] = useState('');
   const [winText, setWinText] = useState('');
 
+  // Inline Editing States
+  const [editingMistakeId, setEditingMistakeId] = useState<number | null>(null);
+  const [editMistakeTitle, setEditMistakeTitle] = useState('');
+  const [editMistakeExplanation, setEditMistakeExplanation] = useState('');
+
+  const [editingWinId, setEditingWinId] = useState<number | null>(null);
+  const [editWinText, setEditWinText] = useState('');
+
   async function loadData() {
     try {
       if (activeTab === 'mistakes') {
@@ -79,6 +87,31 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     await loadData();
   }
 
+  function startEditMistake(item: DbMistake) {
+    setEditingMistakeId(item.id);
+    setEditMistakeTitle(item.title);
+    setEditMistakeExplanation(item.explanation || '');
+  }
+
+  async function handleSaveMistakeEdit() {
+    if (!editMistakeTitle.trim()) {
+      Alert.alert('Error', 'Mistake title cannot be left empty.');
+      return;
+    }
+    try {
+      const db = await openDatabase();
+      await db.runAsync(
+        'UPDATE mistakes SET title = ?, explanation = ? WHERE id = ?;',
+        [editMistakeTitle.trim(), editMistakeExplanation.trim(), editingMistakeId]
+      );
+      setEditingMistakeId(null);
+      await loadData();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Could not save mistake edits.');
+    }
+  }
+
   function confirmDeleteMistake(id: number) {
     Alert.alert('Purge Entry', 'Permanently remove this mistake item?', [
       { text: 'Cancel', style: 'cancel' },
@@ -102,6 +135,27 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     Alert.alert('Saved ✓', 'Victory permanently logged.');
   }
 
+  function startEditWin(item: DbWin) {
+    setEditingWinId(item.id);
+    setEditWinText(item.text);
+  }
+
+  async function handleSaveWinEdit() {
+    if (!editWinText.trim()) {
+      Alert.alert('Error', 'Win description cannot be empty.');
+      return;
+    }
+    try {
+      const db = await openDatabase();
+      await db.runAsync('UPDATE wins SET text = ? WHERE id = ?;', [editWinText.trim(), editingWinId]);
+      setEditingWinId(null);
+      await loadData();
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Error', 'Could not modify win record.');
+    }
+  }
+
   function confirmDeleteWin(id: number) {
     Alert.alert('Delete Win Record', 'Remove this history point entry?', [
       { text: 'Cancel', style: 'cancel' },
@@ -109,6 +163,54 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
           await deleteWin(id);
           await loadData();
       }},
+    ]);
+  }
+
+  // SYSTEM RESET SUITE
+  function triggerSystemReset(mode: 'cards' | 'stats' | 'all') {
+    let title = '';
+    let message = '';
+    
+    if (mode === 'cards') {
+      title = 'Reset Flashcards?';
+      message = 'This will permanently destroy all flashcard configurations and metrics. Decks will remain intact.';
+    } else if (mode === 'stats') {
+      title = 'Reset Performance Stats?';
+      message = 'This will wipe out all historical spaced repetition review log tracking data. Card profiles will persist.';
+    } else {
+      title = '⚠️ FULL RESET WIPE?';
+      message = 'CRITICAL SYSTEM CLEAR: Wipes every single card, deck, historical review log metric, recorded mistake, and victory entry. This cannot be undone.';
+    }
+
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Confirm Reset',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            const db = await openDatabase();
+            if (mode === 'cards') {
+              await db.runAsync('DELETE FROM review_logs;');
+              await db.runAsync('DELETE FROM cards;');
+            } else if (mode === 'stats') {
+              await db.runAsync('DELETE FROM review_logs;');
+              await db.runAsync('UPDATE cards SET difficulty="new", interval_days=0, review_count=0, lapse_count=0;');
+            } else {
+              await db.runAsync('DELETE FROM review_logs;');
+              await db.runAsync('DELETE FROM cards;');
+              await db.runAsync('DELETE FROM decks;');
+              await db.runAsync('DELETE FROM mistakes;');
+              await db.runAsync('DELETE FROM wins;');
+            }
+            await loadData();
+            Alert.alert('System Reset', 'Selected database profiles purged cleanly.');
+          } catch (e) {
+            console.error(e);
+            Alert.alert('Error', 'Failed to execute environment table reset routine.');
+          }
+        }
+      }
     ]);
   }
 
@@ -132,7 +234,6 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     }
   }
 
-  // UPDATED PARSER: Safely handles review logs data structures during JSON imports
   async function handleImportBackupFile() {
     try {
       const selection = await DocumentPicker.getDocumentAsync({
@@ -160,7 +261,6 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
       const db = await openDatabase();
       const now = new Date().toISOString();
 
-      // Wipe tables cleanly
       await db.runAsync('DELETE FROM review_logs;');
       await db.runAsync('DELETE FROM cards;');
       await db.runAsync('DELETE FROM decks;');
@@ -180,7 +280,6 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
         );
       }
 
-      // Safely import logs if they exist inside the payload file
       if (parsed.reviewLogs && Array.isArray(parsed.reviewLogs)) {
         for (const log of parsed.reviewLogs) {
           await db.runAsync(
@@ -199,7 +298,7 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.headerTitle}>Learning Support</Text>
+      <Text style={styles.headerTitle}>Support & Settings</Text>
       
       <View style={styles.tabBarRow}>
         <TouchableOpacity style={[styles.tabButton, activeTab === 'mistakes' && styles.activeTabButton]} onPress={() => setActiveTab('mistakes')}>
@@ -222,18 +321,45 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
               <TextInput style={[styles.inputField, styles.areaInput]} placeholder="Context explanation metrics (Optional)..." placeholderTextColor="#6B7280" multiline value={mistakeExplanation} onChangeText={setMistakeExplanation} />
               <TouchableOpacity style={styles.actionButton} onPress={handleAddMistake}><Text style={styles.actionButtonText}>Add to Mistake Bank</Text></TouchableOpacity>
             </View>
+
+            <Text style={styles.listSectionHeading}>--- CONFUSION JOURNAL ---</Text>
+            
             {mistakes.length === 0 ? (
-              <View style={styles.emptyStateBox}><Text style={styles.emptyTitle}>"Confusion is data."</Text></View>
+              <View style={styles.emptyStateBox}><Text style={styles.emptyTitle}>No active confusions logged.</Text></View>
             ) : mistakes.map((item) => (
-              <View key={item.id} style={[styles.itemCard, item.status === 'resolved' && styles.resolvedItemCard]}>
-                <View style={styles.itemHeaderRow}>
-                  <Text style={[styles.itemMainText, item.status === 'resolved' && styles.strikeText]}>{item.title}</Text>
-                  <TouchableOpacity style={[styles.statusBadge, item.status === 'resolved' ? styles.resolvedBadge : styles.openBadge]} onPress={() => toggleMistakeStatus(item)}>
-                    <Text style={styles.badgeText}>{item.status}</Text>
-                  </TouchableOpacity>
-                </View>
-                {item.explanation && <Text style={styles.itemSecondaryText}>{item.explanation}</Text>}
-                <TouchableOpacity style={styles.purgeItemButton} onPress={() => confirmDeleteMistake(item.id)}><Text style={styles.purgeText}>Remove</Text></TouchableOpacity>
+              <View 
+                key={item.id} 
+                style={[styles.itemCard, item.status === 'resolved' && styles.resolvedItemCard]}
+              >
+                {editingMistakeId === item.id ? (
+                  <View style={{ width: '100%', alignItems: 'center' }}>
+                    <Text style={styles.subEditLabel}>Edit Title</Text>
+                    <TextInput style={styles.inlineInput} value={editMistakeTitle} onChangeText={setEditMistakeTitle} />
+                    <Text style={styles.subEditLabel}>Edit Context</Text>
+                    <TextInput style={[styles.inlineInput, styles.areaInput]} value={editMistakeExplanation} onChangeText={setEditMistakeExplanation} multiline />
+                    <View style={styles.inlineActionRow}>
+                      <TouchableOpacity style={styles.inlineSaveButton} onPress={handleSaveMistakeEdit}><Text style={styles.inlineBtnText}>Save</Text></TouchableOpacity>
+                      <TouchableOpacity style={styles.inlineCancelButton} onPress={() => setEditingMistakeId(null)}><Text style={styles.inlineBtnText}>Cancel</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={{ width: '100%' }}>
+                    <View style={styles.itemHeaderRow}>
+                      <Text style={[styles.itemMainText, item.status === 'resolved' && styles.strikeText]}>{item.title}</Text>
+                      <TouchableOpacity 
+                        style={[styles.statusBadge, item.status === 'resolved' ? styles.resolvedBadge : styles.openBadge]} 
+                        onPress={() => toggleMistakeStatus(item)}
+                      >
+                        <Text style={styles.badgeText}>{item.status}</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {item.explanation && <Text style={styles.itemSecondaryText}>{item.explanation}</Text>}
+                    <View style={styles.itemFooterControlRow}>
+                      <TouchableOpacity style={styles.inlineEditTrigger} onPress={() => startEditMistake(item)}><Text style={styles.editTriggerText}>Edit</Text></TouchableOpacity>
+                      <TouchableOpacity style={styles.purgeItemButton} onPress={() => confirmDeleteMistake(item.id)}><Text style={styles.purgeText}>Remove</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                )}
               </View>
             ))}
           </View>
@@ -246,12 +372,36 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
               <TextInput style={[styles.inputField, styles.areaInput]} placeholder="Celebrate progress. Log a win..." placeholderTextColor="#6B7280" multiline value={winText} onChangeText={setWinText} />
               <TouchableOpacity style={[styles.actionButton, styles.winActionButton]} onPress={handleAddWin}><Text style={styles.actionButtonText}>Log Victory</Text></TouchableOpacity>
             </View>
+
+            <Text style={styles.listSectionHeading}>--- VICTORY HISTORY ---</Text>
+
             {wins.length === 0 ? (
-              <View style={styles.emptyStateBox}><Text style={styles.emptyTitle}>Small adjustments count.</Text></View>
+              <View style={styles.emptyStateBox}><Text style={styles.emptyTitle}>No milestones captured yet.</Text></View>
             ) : wins.map((item) => (
               <View key={item.id} style={styles.itemCard}>
-                <Text style={styles.winItemText}>✨ {item.text}</Text>
-                <TouchableOpacity style={styles.purgeItemButton} onPress={() => confirmDeleteWin(item.id)}><Text style={styles.purgeText}>Remove</Text></TouchableOpacity>
+                {editingWinId === item.id ? (
+                  <View style={{ width: '100%', alignItems: 'center' }}>
+                    <Text style={styles.subEditLabel}>Edit Victory Log</Text>
+                    <TextInput style={[styles.inlineInput, styles.areaInput]} value={editWinText} onChangeText={setEditWinText} multiline />
+                    <View style={styles.inlineActionRow}>
+                      <TouchableOpacity style={styles.inlineSaveButton} onPress={handleSaveWinEdit}><Text style={styles.inlineBtnText}>Save</Text></TouchableOpacity>
+                      <TouchableOpacity style={styles.inlineCancelButton} onPress={() => setEditingWinId(null)}><Text style={styles.inlineBtnText}>Cancel</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={{ width: '100%' }}>
+                    <Text style={styles.winItemText}>✨ {item.text}</Text>
+                    
+                    <Text style={styles.winTimestampText}>
+                      Logged: {new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </Text>
+
+                    <View style={styles.itemFooterControlRow}>
+                      <TouchableOpacity style={styles.inlineEditTrigger} onPress={() => startEditWin(item)}><Text style={styles.editTriggerText}>Edit</Text></TouchableOpacity>
+                      <TouchableOpacity style={styles.purgeItemButton} onPress={() => confirmDeleteWin(item.id)}><Text style={styles.purgeText}>Remove</Text></TouchableOpacity>
+                    </View>
+                  </View>
+                )}
               </View>
             ))}
           </View>
@@ -274,6 +424,24 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
                 <Text style={styles.actionButtonText}>📁 Choose Backup File Picker (.json)</Text>
               </TouchableOpacity>
             </View>
+
+            {/* SYSTEM RESET TERMINAL ZONE */}
+            <View style={[styles.cardInputBox, { borderColor: '#7F1D1D', backgroundColor: '#181111' }]}>
+              <Text style={[styles.fieldLabel, { color: '#FCA5A5' }]}>⛔ System Reset Console</Text>
+              <Text style={styles.infoDescription}>Clear segments or initialize full storage restoration protocols on the local database workspace environment.</Text>
+              
+              <TouchableOpacity style={styles.resetOptionBtn} onPress={() => triggerSystemReset('cards')}>
+                <Text style={styles.resetOptionText}>Wipe Core Flashcards Only</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.resetOptionBtn} onPress={() => triggerSystemReset('stats')}>
+                <Text style={styles.resetOptionText}>Clear Repetition Metrics & Logs Only</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={[styles.resetOptionBtn, { backgroundColor: '#7F1D1D' }]} onPress={() => triggerSystemReset('all')}>
+                <Text style={[styles.resetOptionText, { color: '#FFFFFF' }]}>🔥 FULL APP FACTORY WIPEOUT</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
       </ScrollView>
@@ -292,29 +460,56 @@ const styles = StyleSheet.create({
   scrollWrapper: { flex: 1 },
   scrollContent: { paddingBottom: 150 },
   sectionContainer: { paddingBottom: 40 },
-  cardInputBox: { backgroundColor: '#1F2937', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#374151', marginBottom: 20 },
-  fieldLabel: { color: '#F3F4F6', fontSize: 14, fontWeight: '700', textTransform: 'uppercase', marginBottom: 12 },
-  infoDescription: { color: '#9CA3AF', fontSize: 13, lineHeight: 18, marginBottom: 16 },
-  inputField: { backgroundColor: '#111827', color: '#FFFFFF', borderRadius: 10, padding: 12, fontSize: 15, borderWidth: 1, borderColor: '#374151', marginBottom: 12 },
+  cardInputBox: { backgroundColor: '#1F2937', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#374151', marginBottom: 15 },
+  fieldLabel: { color: '#F3F4F6', fontSize: 14, fontWeight: '700', textTransform: 'uppercase', marginBottom: 12, textAlign: 'center' },
+  infoDescription: { color: '#9CA3AF', fontSize: 13, lineHeight: 18, marginBottom: 16, textAlign: 'center' },
+  inputField: { backgroundColor: '#111827', color: '#FFFFFF', borderRadius: 10, padding: 12, fontSize: 15, borderWidth: 1, borderColor: '#374151', marginBottom: 12, textAlign: 'center' },
   areaInput: { minHeight: 64, textAlignVertical: 'top' },
   actionButton: { backgroundColor: '#EF4444', padding: 14, borderRadius: 10, alignItems: 'center' },
   winActionButton: { backgroundColor: '#10B981' },
   backupExportButton: { backgroundColor: '#2563EB' },
   backupImportButton: { backgroundColor: '#8B5CF6' },
   actionButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  
+  // Section Headings & List Headers
+  listSectionHeading: { color: '#4B5563', fontSize: 11, fontWeight: '800', textAlign: 'center', letterSpacing: 2, marginBottom: 16 },
   emptyStateBox: { backgroundColor: '#1F2937', padding: 24, borderRadius: 16, alignItems: 'center', borderWidth: 1, borderColor: '#374151' },
-  emptyTitle: { color: '#9CA3AF', fontSize: 14, fontWeight: '600' },
+  emptyTitle: { color: '#6B7280', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  
+  // Outer Container Card
   itemCard: { backgroundColor: '#1F2937', padding: 16, borderRadius: 14, borderWidth: 1, borderColor: '#374151', marginBottom: 12 },
-  resolvedItemCard: { opacity: 0.5, borderColor: '#111827' },
-  itemHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
-  itemMainText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', flex: 1 },
+  resolvedItemCard: { opacity: 0.4, borderColor: '#111827' },
+  
+  // Mistakes Top Split Layout Rules
+  itemHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, width: '100%' },
+  itemMainText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', flex: 1, textAlign: 'left' },
   strikeText: { textDecorationLine: 'line-through', color: '#9CA3AF' },
-  statusBadge: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6 },
-  openBadge: { backgroundColor: '#7F1D1D' },
-  resolvedBadge: { backgroundColor: '#065F46' },
-  badgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-  itemSecondaryText: { color: '#D1D5DB', fontSize: 14, marginTop: 8, lineHeight: 18 },
-  winItemText: { color: '#FFFFFF', fontSize: 15, fontWeight: '600' },
-  purgeItemButton: { alignSelf: 'flex-end', marginTop: 4 },
-  purgeText: { color: '#6B7280', fontSize: 12, fontWeight: '600' }
+  statusBadge: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 6 }, 
+  openBadge: { backgroundColor: '#EF4444' }, 
+  resolvedBadge: { backgroundColor: '#10B981' }, 
+  badgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  
+  // Centered Card Injections
+  itemSecondaryText: { color: '#D1D5DB', fontSize: 14, marginTop: 10, lineHeight: 18, textAlign: 'center' },
+  winItemText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', lineHeight: 22, textAlign: 'center' },
+  winTimestampText: { color: '#6B7280', fontSize: 12, textAlign: 'center', marginTop: 12, fontStyle: 'italic' },
+  
+  // Distributed Corner Footer Controls
+  itemFooterControlRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, borderTopWidth: 1, borderColor: '#374151', paddingTop: 10, width: '100%' },
+  inlineEditTrigger: { paddingVertical: 4, paddingHorizontal: 8 },
+  editTriggerText: { color: '#3B82F6', fontSize: 13, fontWeight: '700' },
+  purgeItemButton: { paddingVertical: 4, paddingHorizontal: 8 },
+  purgeText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' }, 
+  
+  // Inline Editor Inputs
+  subEditLabel: { color: '#9CA3AF', fontSize: 12, textTransform: 'uppercase', fontWeight: '600', marginBottom: 6, textAlign: 'center' },
+  inlineInput: { backgroundColor: '#111827', color: '#FFFFFF', borderRadius: 8, padding: 10, fontSize: 14, borderWidth: 1, borderColor: '#4B5563', marginBottom: 12, textAlign: 'center', width: '100%' },
+  inlineActionRow: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 4 },
+  inlineSaveButton: { backgroundColor: '#2563EB', paddingVertical: 6, paddingHorizontal: 18, borderRadius: 6 },
+  inlineCancelButton: { backgroundColor: '#4B5563', paddingVertical: 6, paddingHorizontal: 18, borderRadius: 6 },
+  inlineBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+
+  // System Reset Custom Styles
+  resetOptionBtn: { backgroundColor: '#1F2937', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#4B5563', marginBottom: 10, alignItems: 'center' },
+  resetOptionText: { color: '#FCA5A5', fontWeight: '600', fontSize: 14 }
 });

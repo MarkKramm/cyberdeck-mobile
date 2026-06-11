@@ -102,6 +102,9 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
   else if (stats.dueCount > 5) { statusColor = '#F59E0B'; statusText = 'SYSTEM STATUS: STAGED (Active queue loaded)'; }
   else if (stats.dueCount > 0) { statusColor = '#EAB308'; statusText = 'SYSTEM STATUS: WARN (Remaining targets pending)'; }
 
+  // Restored strict fallback centering for when deck count is minimal inside its box
+  const shouldCenterContent = deckBreakdown.length <= 3;
+
   return (
     <View style={styles.screenContainer}>
       <View style={styles.topCenteredHeaderSection}>
@@ -148,7 +151,7 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
             style={styles.innerElementScroller} 
             contentContainerStyle={[
               styles.baseBreakdownContent, 
-              deckBreakdown.length <= 3 ? styles.centeredBreakdownContent : styles.startBreakdownContent
+              shouldCenterContent ? styles.centeredBreakdownContent : styles.startBreakdownContent
             ]}
             showsVerticalScrollIndicator={true} 
             nestedScrollEnabled={true}
@@ -172,12 +175,19 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
       </View>
 
       <View style={styles.anchoredBottomSection}>
-        {latestWin && (
-          <View style={styles.winCardContainer}>
-            <Text style={styles.winHeaderTitle}>🏆 LATEST SYSTEM BREAKTHROUGH</Text>
-            <Text style={styles.winTextContents}>✨ {latestWin}</Text>
-          </View>
-        )}
+        {/* Permanently Mounted Breakthrough Console */}
+        <View style={[styles.winCardContainer, !latestWin && styles.emptyWinCardContainer]}>
+          <Text style={[styles.winHeaderTitle, !latestWin && styles.emptyWinHeaderTitle]}>
+            🏆 LATEST SYSTEM BREAKTHROUGH ✨
+          </Text>
+          {/* ScrollView safeguards max height bounds defensively against huge texts */}
+          <ScrollView style={styles.winTextScrollView} nestedScrollEnabled={true} showsVerticalScrollIndicator={false}>
+            <Text style={[styles.winTextContents, !latestWin && styles.emptyWinTextContents]}>
+              {latestWin ? `${latestWin}` : "No breakthrough logged. Review targets and forge progress today."}
+            </Text>
+          </ScrollView>
+        </View>
+
         <View style={styles.footerHealthDetailsBar}>
           <Text style={styles.footerInlineStatsText}>Total Cards: {stats.totalCards}</Text>
           <Text style={styles.footerInlineDivider}>|</Text>
@@ -213,7 +223,6 @@ const styles = StyleSheet.create({
   actionButtonMainText: { color: '#60A5FA', fontWeight: '800', fontSize: 19, marginBottom: 2, textAlign: 'center' },
   actionButtonSecondaryText: { color: '#9CA3AF', fontWeight: '500', fontSize: 11, letterSpacing: 0.2, textAlign: 'center' },
   
-  // Kept original comfortable padding settings
   breakdownListSectionContainer: { flex: 1, minHeight: 120, backgroundColor: '#1F2937', padding: 14, borderRadius: 16, borderWidth: 1, borderColor: '#374151', marginBottom: 16 },
   innerElementScroller: { flex: 1 },
   
@@ -221,10 +230,8 @@ const styles = StyleSheet.create({
   centeredBreakdownContent: { justifyContent: 'center' },
   startBreakdownContent: { justifyContent: 'flex-start' },
   
-  // Shrunk title space tightly down to 2 so list starts immediately and avoids cutting the 4th row
-  sectionTitleLabel: { color: '#6B7280', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 2 },
+  sectionTitleLabel: { color: '#6B7280', fontSize: 10, fontWeight: '800', letterSpacing: 1, marginBottom: 4 },
   
-  // RESTORED original beautiful vertical spacing heights so HR lines breathe nicely around text
   breakdownRowLine: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#2D3748' },
   deckIndicatorMiniDot: { width: 6, height: 6, borderRadius: 3, marginRight: 10 },
   deckBreakdownNameText: { color: '#D1D5DB', fontSize: 13, fontWeight: '600', flex: 1 },
@@ -234,10 +241,20 @@ const styles = StyleSheet.create({
   caughtUpEmoji: { fontSize: 24, marginBottom: 4 },
   caughtUpText: { color: '#10B981', fontSize: 12, fontWeight: '800', letterSpacing: 0.5, textAlign: 'center' },
   caughtUpSubText: { color: '#6B7280', fontSize: 11, fontWeight: '500', marginTop: 2, textAlign: 'center' },
+  
   anchoredBottomSection: { marginTop: 'auto', gap: 12 },
-  winCardContainer: { backgroundColor: '#1F2937', padding: 14, borderRadius: 16, borderWidth: 1, borderColor: '#10B981', alignItems: 'center', justifyContent: 'center' },
+  
+  // High-fidelity active win container with static vertical limits
+  winCardContainer: { backgroundColor: '#1F2937', padding: 14, borderRadius: 16, borderWidth: 1, borderColor: '#10B981', alignItems: 'center', justifyContent: 'center', minHeight: 82 },
   winHeaderTitle: { color: '#10B981', fontSize: 10, fontWeight: '800', letterSpacing: 0.5, marginBottom: 4, textAlign: 'center' },
+  winTextScrollView: { maxHeight: 46, width: '100%' },
   winTextContents: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', lineHeight: 18, textAlign: 'center' },
+  
+  // Clean fallback context styles for empty wins state
+  emptyWinCardContainer: { borderColor: '#374151' },
+  emptyWinHeaderTitle: { color: '#FFFFFF' },
+  emptyWinTextContents: { color: '#4B5563', fontStyle: 'italic', fontWeight: '400' },
+  
   footerHealthDetailsBar: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 4 },
   footerInlineStatsText: { color: '#6B7280', fontSize: 11, fontWeight: '700' },
   footerInlineDivider: { color: '#2D3748', fontSize: 11 }

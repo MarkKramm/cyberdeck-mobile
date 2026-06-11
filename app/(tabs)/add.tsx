@@ -47,7 +47,7 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
         try {
             const dbDecks = await getAllDecks();
             setDecks(dbDecks);
-            
+
             if (autoSelectId) {
                 setSelectedDeckId(Number(autoSelectId));
             } else if (dbDecks.length > 0 && selectedDeckId === null) {
@@ -78,21 +78,21 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
             }
 
             await createDeck(newDeckName.trim(), newDeckDesc.trim(), newDeckColor);
-            
+
             const updatedDecks = await getAllDecks();
             const newlyCreated = updatedDecks.find(d => d.name.toLowerCase() === newDeckName.trim().toLowerCase());
-            
+
             setNewDeckName('');
             setNewDeckDesc('');
             setIsModalVisible(false);
-            
+
             if (newlyCreated) {
                 setDecks(updatedDecks);
                 setSelectedDeckId(Number(newlyCreated.id));
             } else {
                 await loadDecks();
             }
-            
+
             Alert.alert('Deck Forged ✓', 'Your custom category is live.');
         } catch (error) {
             Alert.alert('System Error', 'Could not register custom deck layout.');
@@ -104,7 +104,7 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
             Alert.alert('System Missing Deck', 'Please select or create a deck first.');
             return;
         }
-        
+
         if (!front.trim() || !back.trim()) {
             Alert.alert('Missing Info', 'Please add both a question (Front) and an answer (Back).');
             return;
@@ -139,7 +139,7 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
     return (
         <ScrollView style={{ flex: 1, backgroundColor: '#111827' }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
             <View style={styles.formBox}>
-                <Text style={styles.title}>Forge Card</Text>
+                <Text style={styles.title}>FORGE CARD</Text>
 
                 {/* Target Deck Dropdown selection area block */}
                 <View style={styles.fieldWrapper}>
@@ -149,13 +149,13 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                             <Text style={styles.plusTriggerText}>➕ Custom Deck</Text>
                         </TouchableOpacity>
                     </View>
-                    
-                    <TouchableOpacity 
+
+                    <TouchableOpacity
                         style={[
-                            styles.dropdownTrigger, 
+                            styles.dropdownTrigger,
                             { backgroundColor: dynamicTriggerBg },
                             selectedDeckId !== null && { borderColor: '#FFFFFF', borderWidth: 1.5 }
-                        ]} 
+                        ]}
                         onPress={() => setIsDeckPickerVisible(true)}
                     >
                         <Text style={styles.dropdownTriggerText} numberOfLines={1}>📁 {displayedDeckName}</Text>
@@ -172,12 +172,12 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                                 {decks.map((deck) => {
                                     const isCurrentSelected = selectedDeckId === deck.id;
                                     return (
-                                        <TouchableOpacity 
-                                            key={deck.id} 
+                                        <TouchableOpacity
+                                            key={deck.id}
                                             style={[
-                                                styles.modalOption, 
+                                                styles.modalOption,
                                                 isCurrentSelected && { backgroundColor: deck.color || '#2563EB', borderColor: '#FFFFFF', borderWidth: 1.5 }
-                                            ]} 
+                                            ]}
                                             onPress={() => {
                                                 setSelectedDeckId(deck.id);
                                                 setIsDeckPickerVisible(false);
@@ -264,11 +264,11 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                 </View>
 
                 {/* Save Button with color sync mapping */}
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[
-                        styles.button, 
+                        styles.button,
                         { backgroundColor: dynamicTriggerBg, borderColor: selectedDeckId !== null ? '#FFFFFF' : '#3B82F6' }
-                    ]} 
+                    ]}
                     onPress={handleSaveCard}
                 >
                     <Text style={styles.buttonText}>Save Card</Text>
@@ -280,20 +280,20 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalBox}>
                         <Text style={styles.modalTitle}>Create Custom Deck</Text>
-                        
+
                         <Text style={styles.modalLabel}>Deck Name</Text>
-                        <TextInput 
-                            style={styles.modalInput} 
-                            placeholder="e.g., Spanish Vocab" 
+                        <TextInput
+                            style={styles.modalInput}
+                            placeholder="e.g., Spanish Vocab"
                             placeholderTextColor="#6B7280"
                             value={newDeckName}
                             onChangeText={setNewDeckName}
                         />
 
                         <Text style={styles.modalLabel}>Description (Optional)</Text>
-                        <TextInput 
-                            style={styles.modalInput} 
-                            placeholder="What are you studying here?" 
+                        <TextInput
+                            style={styles.modalInput}
+                            placeholder="What are you studying here?"
                             placeholderTextColor="#6B7280"
                             value={newDeckDesc}
                             onChangeText={setNewDeckDesc}
@@ -327,20 +327,20 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
 const styles = StyleSheet.create({
     container: { padding: 24, paddingTop: 64, justifyContent: 'center' },
     formBox: { width: '100%' },
-    title: { fontSize: 34, fontWeight: 'bold', color: '#FFFFFF', marginBottom: 14, textAlign: 'center', letterSpacing: 0.5 },
-    
+    title: { fontSize: 42,fontWeight: '300',color: '#FFFFFF', marginBottom: 8, textAlign: 'center', letterSpacing: 4 },
+
     // Balanced Spacing constraints to pull Save button back up safely
     fieldWrapper: { marginBottom: 13 },
     headerLabelRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
     plusTriggerButton: { backgroundColor: '#1F2937', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1, borderColor: '#374151' },
     plusTriggerText: { color: '#60A5FA', fontSize: 12, fontWeight: '700' },
-    label: { color: '#9CA3AF', fontSize: 14, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
-    
+    label: { color: '#afb5c0', fontSize: 14, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+
     // Dropdown Selection Trigger Design Specs
     dropdownTrigger: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#374151' },
     dropdownTriggerText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', flex: 1 },
     dropdownArrow: { color: '#9CA3AF', fontSize: 12, marginLeft: 8 },
-    
+
     // Dropdown Modal Subsystem Layout Architecture
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.85)', justifyContent: 'center', padding: 24 },
     modalContent: { width: '100%', backgroundColor: '#1F2937', borderRadius: 16, borderWidth: 1, borderColor: '#374151', padding: 16 },
@@ -350,14 +350,14 @@ const styles = StyleSheet.create({
     selectorScroll: { flexDirection: 'row' },
     selectorItem: { backgroundColor: '#1F2937', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#374151', justifyContent: 'center' },
     selectorText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
-    
+
     // Restored deep layout terminal text boxes
     input: { backgroundColor: '#1F2937', color: '#FFFFFF', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#374151', fontSize: 16, textAlignVertical: 'center', textAlign: 'center' },
     answerInput: { minHeight: 110 },
-    
+
     button: { padding: 18, borderRadius: 12, marginTop: 8, alignItems: 'center', borderWidth: 1, borderBottomWidth: 1, borderBottomColor: '#FFFFFF' },
     buttonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 18 },
-    
+
     modalBox: { backgroundColor: '#1F2937', borderRadius: 20, padding: 24, borderWidth: 1, borderColor: '#374151' },
     modalTitle: { color: '#FFFFFF', fontSize: 24, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
     modalLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 },

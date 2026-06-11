@@ -10,16 +10,16 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     const [showAnswer, setShowAnswer] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [isPickerVisible, setIsPickerVisible] = useState(false);
-    
-    // Non-destructive safe mode flag
+
+    // Non-destructive practice mode flag.
     const [isReViewMode, setIsReViewMode] = useState(false);
 
     async function refreshReviewQueue(deckFilter: string, reViewActive: boolean) {
         setIsLoading(true);
         try {
             const activeDecks = await getAllDecks();
-            
-            // Fallback to 'All' if the currently selected deck filter no longer exists in database
+
+            // Fallback to "All" if the currently selected deck filter no longer exists.
             let activeFilter = deckFilter;
             if (deckFilter !== 'All' && !activeDecks.some(deck => String(deck.id) === deckFilter)) {
                 activeFilter = 'All';
@@ -27,7 +27,7 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
             }
 
             const targetedDueQueue = await getDueCards(30, activeFilter, reViewActive);
-            
+
             setDecks(activeDecks);
             setDueCards(targetedDueQueue);
             setCurrentIndex(0);
@@ -81,27 +81,48 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
 
     const currentCard = dueCards[currentIndex];
 
-    // Check if the currently filtered custom deck is empty vs caught up
     const currentFilteredDeckObj = decks.find(d => String(d.id) === selectedDeckIdFilter);
     const isSelectedDeckEmpty = selectedDeckIdFilter !== 'All' && currentFilteredDeckObj && (!dueCards.length && !currentCard);
 
-    // Dynamic label and dynamic background matching logic for main screen trigger
-    const currentDeckName = selectedDeckIdFilter === 'All' ? '🌌 All Terminal Scopes' : (currentFilteredDeckObj?.name || 'Unknown Scope');
-    const dynamicTriggerBg = selectedDeckIdFilter === 'All' 
-        ? (isReViewMode ? '#1E293B' : '#1F2937') 
-        : (currentFilteredDeckObj?.color || '#1F2937');
+    const currentDeckName = selectedDeckIdFilter === 'All' ? 'All Decks' : (currentFilteredDeckObj?.name || 'Unknown Deck');
+
+    const activeCardDeckObj = currentCard ? decks.find(d => d.id === currentCard.deck_id) : undefined;
+    const deckAccentColor = activeCardDeckObj?.color || currentFilteredDeckObj?.color || '#60A5FA';
+
+    // Re-View Mode is a full visual override.
+    // Normal mode follows the selected/current deck color.
+    const activeCardAccent = isReViewMode ? '#10B981' : deckAccentColor;
+    const dropdownBackground = isReViewMode
+        ? '#0F241E'
+        : selectedDeckIdFilter === 'All'
+            ? '#1F2937'
+            : (currentFilteredDeckObj?.color || '#1F2937');
+
+    const visibleMainText = showAnswer ? (currentCard?.back || '') : (currentCard?.front || '');
+    const visibleNotesText = showAnswer ? (currentCard?.notes || '') : '';
+    const payloadLength = visibleMainText.length + visibleNotesText.length;
+
+    // Short cards should feel like real flashcards.
+    // Long cards should start near the top and scroll naturally.
+    const isCompactPayload = payloadLength <= 160;
+    const isMediumPayload = payloadLength > 160 && payloadLength <= 420;
+    const shouldCenterPayload = isCompactPayload || isMediumPayload;
+    const shouldCenterMainText = isCompactPayload;
+    const hasNotes = Boolean(currentCard?.notes && currentCard.notes.trim().length > 0);
+
+    const sideLabel = showAnswer ? 'BACK' : 'FRONT';
 
     return (
         <View style={styles.screenWrapper}>
-            {/* Header Controls Menu Bar Row */}
+            {/* Header Controls */}
             <View style={styles.headerControlSection}>
                 <Text style={[styles.screenTitle, isReViewMode && styles.screenTitleReView]}>
-                    {isReViewMode ? "🔄 | Re-Viewing..." : "📖 | Study Cards"}
+                    {isReViewMode ? '🔄 Re-View Mode' : '📖 Study Cards'}
                 </Text>
-                
+
                 <View style={styles.switchControlWrapper}>
                     <Text style={[styles.switchControlLabel, isReViewMode && styles.switchControlLabelActive]}>
-                        Re-View Mode
+                        Re-View
                     </Text>
                     <Switch
                         trackColor={{ false: '#374151', true: '#10B981' }}
@@ -113,50 +134,67 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                 </View>
             </View>
 
-            {/* Main Screen Dropdown Trigger Button - Syncs with the selected deck color */}
-            <TouchableOpacity 
+            {/* Deck Selector */}
+            <TouchableOpacity
                 style={[
-                    styles.dropdownTrigger, 
-                    { backgroundColor: dynamicTriggerBg },
-                    isReViewMode && selectedDeckIdFilter === 'All' && styles.dropdownTriggerReViewDefault,
-                    selectedDeckIdFilter !== 'All' && { borderColor: '#FFFFFF', borderWidth: 1.5 }
-                ]} 
+                    styles.dropdownTrigger,
+                    { backgroundColor: dropdownBackground },
+                    isReViewMode
+                        ? styles.dropdownTriggerReView
+                        : selectedDeckIdFilter !== 'All'
+                            ? { borderColor: '#FFFFFF', borderWidth: 1.5 }
+                            : null
+                ]}
                 onPress={() => setIsPickerVisible(true)}
             >
                 <Text style={styles.dropdownTriggerText} numberOfLines={1}>
-                    Scope Target: {currentDeckName}
+                    Deck 📚: {currentDeckName}
                 </Text>
-                <Text style={styles.dropdownArrow}>▼</Text>
+                <Text style={[styles.dropdownArrow, isReViewMode && styles.dropdownArrowReView]}>▼</Text>
             </TouchableOpacity>
 
-            {/* Options Picker Modal List */}
+            {isReViewMode && (
+                <View style={styles.reViewModeBanner}>
+                    <Text style={styles.reViewModeBannerTitle}>🔄 RE-VIEW MODE ACTIVE</Text>
+                    <Text style={styles.reViewModeBannerSubtext}>Free practice only • SRS schedule protected</Text>
+                </View>
+            )}
+
+            {/* Deck Picker Modal */}
             <Modal transparent visible={isPickerVisible} animationType="fade" onRequestClose={() => setIsPickerVisible(false)}>
                 <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setIsPickerVisible(false)}>
                     <View style={styles.modalContent}>
-                        <Text style={styles.modalTitle}>[ SELECT SYSTEM TARGET SCOPE ]</Text>
+                        <Text style={styles.modalTitle}>SELECT DECK</Text>
                         <ScrollView style={{ maxHeight: 300 }} showsVerticalScrollIndicator={false}>
-                            
-                            {/* "All" Scope Row Selection */}
-                            <TouchableOpacity 
-                                style={[styles.modalOption, selectedDeckIdFilter === 'All' && styles.modalOptionActive]} 
+                            <TouchableOpacity
+                                style={[
+                                    styles.modalOption,
+                                    selectedDeckIdFilter === 'All' && (isReViewMode ? styles.modalOptionActiveReView : styles.modalOptionActive)
+                                ]}
                                 onPress={() => handleFilterPress('All')}
                             >
-                                <Text style={styles.modalOptionText}>🌌 All Terminal Scopes</Text>
+                                <Text style={styles.modalOptionText}>📚 All Decks</Text>
                             </TouchableOpacity>
 
-                            {/* Custom User Decks - Kept dark uniform unless it is the active chosen one */}
                             {decks.map((deck) => {
                                 const isCurrentSelected = selectedDeckIdFilter === String(deck.id);
                                 return (
-                                    <TouchableOpacity 
-                                        key={deck.id} 
+                                    <TouchableOpacity
+                                        key={deck.id}
                                         style={[
-                                            styles.modalOption, 
-                                            isCurrentSelected && { backgroundColor: deck.color || '#2563EB', borderColor: '#FFFFFF', borderWidth: 1.5 }
-                                        ]} 
+                                            styles.modalOption,
+                                            isCurrentSelected && (
+                                                isReViewMode
+                                                    ? styles.modalOptionActiveReView
+                                                    : { backgroundColor: deck.color || '#2563EB', borderColor: '#FFFFFF', borderWidth: 1.5 }
+                                            )
+                                        ]}
                                         onPress={() => handleFilterPress(String(deck.id))}
                                     >
-                                        <Text style={styles.modalOptionText}>📁 {deck.name}</Text>
+                                        <View style={styles.modalDeckRow}>
+                                            <View style={[styles.modalDeckDot, { backgroundColor: deck.color || '#60A5FA' }]} />
+                                            <Text style={styles.modalOptionText} numberOfLines={1}>📁 {deck.name}</Text>
+                                        </View>
                                     </TouchableOpacity>
                                 );
                             })}
@@ -169,76 +207,143 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                 <View style={styles.emptyStateContainer}>
                     <Text style={styles.clearedIcon}>🚀</Text>
                     <Text style={styles.clearedPrimaryText}>
-                        {isSelectedDeckEmpty ? "Deck Database Empty" : "Queue Matrix Secure"}
+                        {isSelectedDeckEmpty ? 'Deck Empty' : 'Review Queue Clear'}
                     </Text>
                     <Text style={styles.clearedSecondaryText}>
-                        {isSelectedDeckEmpty 
-                          ? "There are no cards built in this deck yet. Please add cards to get started!"
-                          : isReViewMode 
-                            ? "No items match your library categories. Add cards first!"
-                            : "All cards caught up. Switch on Cheat Re-View Mode above to practice concepts ahead of schedule!"}
+                        {isSelectedDeckEmpty
+                            ? 'There are no cards in this deck yet. Add cards to get started.'
+                            : isReViewMode
+                                ? 'No cards found for this deck. Add cards first.'
+                                : 'All due cards are caught up. Turn on Re-View Mode to practice ahead of schedule.'}
                     </Text>
                 </View>
             ) : (
-                <View style={styles.adaptiveContentGrid}>
-                    
-                    {/* Compact Front Box Container */}
-                    <View style={[styles.questionCardBox, isReViewMode && styles.cardBoxReView]}>
-                        <View style={styles.cardMetaHeaderRow}>
-                            <Text style={[styles.deckLabelCode, isReViewMode && styles.deckLabelCodeReView]}>{currentCard?.deck_name || 'SYSTEM CORE'}</Text>
-                            <Text style={styles.typeTagBadge}>{currentCard?.card_type}</Text>
-                        </View>
-                        <Text style={styles.questionOutputText}>{currentCard?.front}</Text>
-                        <Text style={styles.trackerIndexLabel}>Card(s): {currentIndex + 1} / {dueCards.length}</Text>
-                    </View>
+                <View style={styles.reviewWorkspace}>
+                    {/* Unified Flashcard */}
+                    <View
+                        style={[
+                            styles.flashcardShell,
+                            { borderColor: activeCardAccent },
+                            isReViewMode && styles.flashcardShellReView
+                        ]}
+                    >
+                        {/* Top metadata: deck + front/back indicator */}
+                        <View style={styles.flashcardMetaPanel}>
+                            <View style={styles.metaTopRow}>
+                                <View style={styles.deckIdentityRow}>
+                                    <View style={[styles.deckColorDot, { backgroundColor: deckAccentColor }]} />
+                                    <Text style={[styles.deckLabelCode, { color: activeCardAccent }]} numberOfLines={1}>
+                                        {currentCard?.deck_name || 'Unknown Deck'}
+                                    </Text>
+                                </View>
 
-                    {/* Elastic Lower Box */}
-                    <View style={[styles.answerCardBox, isReViewMode && styles.cardBoxReView]}>
-                        {!showAnswer ? (
-                            <TouchableOpacity style={[styles.fullPaneRevealButton, isReViewMode && styles.fullPaneRevealButtonReView]} onPress={() => setShowAnswer(true)}>
-                                <Text style={[styles.revealActionLabel, isReViewMode && styles.revealActionLabelReView]}>
-                                    📡 Decrypt Card Output Payload
-                                </Text>
-                            </TouchableOpacity>
-                        ) : (
-                            <View style={styles.answerPayloadLayoutContainer}>
-                                <ScrollView style={styles.answerBodyScroller} showsVerticalScrollIndicator={false}>
-                                    <Text style={styles.sectionHeadingLabel}>[ DECRYPTED DATA DEPLOYMENT ]</Text>
-                                    <Text style={styles.answerOutputText}>{currentCard?.back}</Text>
-                                    
-                                    {currentCard?.notes && (
-                                        <View style={styles.notesBlockQuote}>
-                                            <Text style={styles.sectionHeadingLabel}>[ EXTRADITED SYSTEM TRACE NOTES ]</Text>
-                                            <Text style={styles.notesOutputText}>{currentCard?.notes}</Text>
-                                        </View>
-                                    )}
-                                </ScrollView>
-
-                                {/* Rating Buttons Lane Container */}
-                                {!isReViewMode ? (
-                                    <View style={styles.srsButtonRatingRow}>
-                                        <TouchableOpacity style={[styles.ratingBtn, { backgroundColor: '#EF4444' }]} onPress={() => handleScoreCard('again')}>
-                                            <Text style={styles.ratingBtnText}>Again</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={[styles.ratingBtn, { backgroundColor: '#F59E0B' }]} onPress={() => handleScoreCard('hard')}>
-                                            <Text style={styles.ratingBtnText}>Hard</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={[styles.ratingBtn, { backgroundColor: '#2563EB' }]} onPress={() => handleScoreCard('good')}>
-                                            <Text style={styles.ratingBtnText}>Good</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity style={[styles.ratingBtn, { backgroundColor: '#10B981' }]} onPress={() => handleScoreCard('easy')}>
-                                            <Text style={styles.ratingBtnText}>Easy</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                ) : (
-                                    <TouchableOpacity style={styles.readOnlyNextButton} onPress={handleReViewNext}>
-                                        <Text style={styles.readOnlyNextButtonText}>👉 Next Re-View Concept</Text>
-                                    </TouchableOpacity>
-                                )}
+                                <View style={[styles.sidePill, isReViewMode && styles.sidePillReView]}>
+                                    <Text style={[styles.sidePillText, isReViewMode && styles.sidePillTextReView]}>
+                                        [{sideLabel}]
+                                    </Text>
+                                </View>
                             </View>
-                        )}
+
+                            {/* Second metadata row: card type + counter */}
+                            <View style={styles.metaBottomRow}>
+                                <View style={[
+                                    styles.cardTypePill,
+                                    { borderColor: activeCardAccent },
+                                    isReViewMode && styles.cardTypePillReView
+                                ]}>
+                                    <Text style={[styles.cardTypePillText, isReViewMode && styles.cardTypePillTextReView]}>
+                                        {currentCard?.card_type || 'Card'}
+                                    </Text>
+                                </View>
+
+                                <Text style={[styles.trackerIndexLabel, isReViewMode && styles.trackerIndexLabelReView]}>
+                                    Card(s): {currentIndex + 1} / {dueCards.length}
+                                </Text>
+                            </View>
+                        </View>
+
+                        <View style={[styles.flashcardDivider, { backgroundColor: activeCardAccent }]} />
+
+                        {/* Card body */}
+                        <ScrollView
+                            style={styles.flashcardBodyScroller}
+                            contentContainerStyle={[
+                                styles.flashcardBodyContent,
+                                shouldCenterPayload ? styles.flashcardBodyContentCentered : styles.flashcardBodyContentTop
+                            ]}
+                            showsVerticalScrollIndicator={false}
+                        >
+                            {!showAnswer ? (
+                                <View style={styles.payloadBlock}>
+                                    <Text style={[styles.frontText, shouldCenterMainText && styles.centeredPayloadText]}>
+                                        {currentCard?.front}
+                                    </Text>
+                                </View>
+                            ) : (
+                                <View style={styles.payloadBlock}>
+                                    <Text style={[styles.answerSectionLabel, shouldCenterMainText && styles.centeredPayloadText]}>
+                                        [ ANSWER ]
+                                    </Text>
+
+                                    <Text style={[styles.backText, shouldCenterMainText && styles.centeredPayloadText]}>
+                                        {currentCard?.back}
+                                    </Text>
+
+                                    {hasNotes ? (
+                                        <View
+                                            style={[
+                                                styles.notesBlockQuote,
+                                                { borderLeftColor: activeCardAccent },
+                                                shouldCenterMainText && styles.notesBlockCompact
+                                            ]}
+                                        >
+                                            <Text style={[styles.notesSectionLabel, shouldCenterMainText && styles.centeredPayloadText]}>
+                                                [ ADDITIONAL NOTES ]
+                                            </Text>
+                                            <Text style={[styles.notesOutputText, shouldCenterMainText && styles.centeredPayloadText]}>
+                                                {currentCard.notes}
+                                            </Text>
+                                        </View>
+                                    ) : null}
+                                </View>
+                            )}
+                        </ScrollView>
                     </View>
 
+                    {/* Action Controls */}
+                    {!showAnswer ? (
+                        <TouchableOpacity
+                            style={[
+                                styles.revealButton,
+                                { borderColor: activeCardAccent },
+                                isReViewMode && styles.revealButtonReView
+                            ]}
+                            onPress={() => setShowAnswer(true)}
+                        >
+                            <Text style={[styles.revealActionLabel, isReViewMode && styles.revealActionLabelReView]}>
+                                Reveal Answer
+                            </Text>
+                        </TouchableOpacity>
+                    ) : !isReViewMode ? (
+                        <View style={styles.srsButtonRatingRow}>
+                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnAgain]} onPress={() => handleScoreCard('again')}>
+                                <Text style={styles.ratingBtnText}>😵 Again</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnHard]} onPress={() => handleScoreCard('hard')}>
+                                <Text style={styles.ratingBtnText}>🤔 Hard</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnGood]} onPress={() => handleScoreCard('good')}>
+                                <Text style={styles.ratingBtnText}>👍 Good</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnEasy]} onPress={() => handleScoreCard('easy')}>
+                                <Text style={styles.ratingBtnText}>🚀 Easy</Text>
+                            </TouchableOpacity>
+                        </View>
+                    ) : (
+                        <TouchableOpacity style={styles.readOnlyNextButton} onPress={handleReViewNext}>
+                            <Text style={styles.readOnlyNextButtonText}>Next Card</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             )}
         </View>
@@ -246,56 +351,470 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
 }
 
 const styles = StyleSheet.create({
-    screenWrapper: { flex: 1, backgroundColor: '#111827', paddingHorizontal: 16, paddingTop: 54, paddingBottom: 16 },
-    centeringWrapper: { flex: 1, backgroundColor: '#111827', justifyContent: 'center', alignItems: 'center' },
-    headerControlSection: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-    screenTitle: { fontSize: 22, fontWeight: 'bold', color: '#FFFFFF', flex: 1 },
-    screenTitleReView: { color: '#10B981' },
-    switchControlWrapper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    switchControlLabel: { color: '#9CA3AF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-    switchControlLabelActive: { color: '#10B981' },
-    
-    // Main Dropdown Button Interface
-    dropdownTrigger: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#374151', marginBottom: 18 },
-    dropdownTriggerReViewDefault: { borderColor: '#10B981', borderWidth: 1.5 },
-    dropdownTriggerText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', flex: 1 },
-    dropdownArrow: { color: '#9CA3AF', fontSize: 12, marginLeft: 8 },
-    
-    // Uniform, Clean Terminal Popup Styles
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 24 },
-    modalContent: { width: '100%', backgroundColor: '#1F2937', borderRadius: 16, borderWidth: 1, borderColor: '#374151', padding: 16 },
-    modalTitle: { color: '#6B7280', fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 14, textAlign: 'center' },
-    modalOption: { backgroundColor: '#111827', padding: 14, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#374151' }, // Clean dark default styling
-    modalOptionActive: { backgroundColor: '#2563EB', borderColor: '#3B82F6' },
-    modalOptionText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', textShadowColor: 'rgba(0, 0, 0, 0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+    screenWrapper: {
+        flex: 1,
+        backgroundColor: '#111827',
+        paddingHorizontal: 16,
+        paddingTop: 54,
+        paddingBottom: 16
+    },
+    centeringWrapper: {
+        flex: 1,
+        backgroundColor: '#111827',
+        justifyContent: 'center',
+        alignItems: 'center'
+    },
 
-    adaptiveContentGrid: { flex: 1, flexDirection: 'column', gap: 12 },
-    questionCardBox: { backgroundColor: '#1F2937', borderRadius: 16, borderWidth: 1, borderColor: '#374151', padding: 16 },
-    cardBoxReView: { backgroundColor: '#1E293B', borderColor: '#10B981', borderWidth: 1.5 },
-    answerCardBox: { flex: 1, backgroundColor: '#1F2937', borderRadius: 16, borderWidth: 1, borderColor: '#374151', padding: 16, overflow: 'hidden' },
-    cardMetaHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-    deckLabelCode: { color: '#60A5FA', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', flex: 1, marginRight: 8 },
-    deckLabelCodeReView: { color: '#10B981' },
-    typeTagBadge: { backgroundColor: '#374151', color: '#F3F4F6', paddingVertical: 4, paddingHorizontal: 8, borderRadius: 6, fontSize: 11, fontWeight: '700', textTransform: 'uppercase' },
-    questionOutputText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', lineHeight: 24, marginBottom: 7 },
-    trackerIndexLabel: { color: '#6B7280', fontSize: 11, fontWeight: '600', alignSelf: 'flex-end' },
-    fullPaneRevealButton: { flex: 1, backgroundColor: '#111827', borderRadius: 12, borderWidth: 1, borderColor: '#374151', justifyContent: 'center', alignItems: 'center', borderStyle: 'dashed' },
-    fullPaneRevealButtonReView: { borderColor: '#10B981' },
-    revealActionLabel: { color: '#60A5FA', fontSize: 15, fontWeight: '700' },
-    revealActionLabelReView: { color: '#10B981' },
-    answerPayloadLayoutContainer: { flex: 1, flexDirection: 'column', justifyContent: 'space-between' },
-    answerBodyScroller: { flex: 1, marginBottom: 8 },
-    sectionHeadingLabel: { color: '#6B7280', fontSize: 10, fontWeight: '700', letterSpacing: 1, marginBottom: 6 },
-    answerOutputText: { color: '#E5E7EB', fontSize: 16, lineHeight: 24, marginBottom: 12 },
-    notesBlockQuote: { borderLeftWidth: 3, borderLeftColor: '#2563EB', paddingLeft: 10, marginTop: 10 },
-    notesOutputText: { color: '#9CA3AF', fontSize: 13, fontStyle: 'italic', lineHeight: 18 },
-    srsButtonRatingRow: { flexDirection: 'row', gap: 6, height: 44, marginTop: 4 },
-    ratingBtn: { flex: 1, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderBottomWidth: 3, borderBottomColor: 'rgba(0,0,0,0.25)' },
-    ratingBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13, textShadowColor: 'rgba(0, 0, 0, 0.4)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
-    readOnlyNextButton: { backgroundColor: '#10B981', paddingVertical: 12, borderRadius: 10, alignItems: 'center', marginTop: 4 },
-    readOnlyNextButtonText: { color: '#FFFFFF', fontWeight: '700', fontSize: 14 },
-    emptyStateContainer: { flex: 1, backgroundColor: '#1F2937', borderRadius: 16, borderWidth: 1, borderColor: '#374151', justifyContent: 'center', alignItems: 'center', padding: 32 },
-    clearedIcon: { fontSize: 44, marginBottom: 14 },
-    clearedPrimaryText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginBottom: 6 },
-    clearedSecondaryText: { color: '#9CA3AF', fontSize: 13, textAlign: 'center', lineHeight: 18 }
+    // Header
+    headerControlSection: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16
+    },
+    screenTitle: {
+        fontSize: 22,
+        fontWeight: '300',
+        color: '#FFFFFF',
+        flex: 1,
+        letterSpacing: 1
+    },
+    screenTitleReView: {
+        color: '#10B981'
+    },
+    switchControlWrapper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8
+    },
+    switchControlLabel: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '800',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5
+    },
+    switchControlLabelActive: {
+        color: '#10B981'
+    },
+
+    // Deck selector
+    dropdownTrigger: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#ffffff',
+        marginBottom: 18
+    },
+    dropdownTriggerReView: {
+        borderColor: '#10B981',
+        borderWidth: 1.5
+    },
+    dropdownTriggerText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '800',
+        flex: 1
+    },
+    dropdownArrow: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        marginLeft: 8
+    },
+    dropdownArrowReView: {
+        color: '#A7F3D0'
+    },
+
+    // Re-View Mode identity banner
+    reViewModeBanner: {
+        backgroundColor: 'rgba(16, 185, 129, 0.10)',
+        borderColor: '#10B981',
+        borderWidth: 1,
+        borderRadius: 14,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        marginTop: -8,
+        marginBottom: 14,
+        alignItems: 'center'
+    },
+    reViewModeBannerTitle: {
+        color: '#10B981',
+        fontSize: 12,
+        fontWeight: '900',
+        letterSpacing: 1
+    },
+    reViewModeBannerSubtext: {
+        color: '#A7F3D0',
+        fontSize: 11,
+        fontWeight: '600',
+        marginTop: 2,
+        textAlign: 'center'
+    },
+
+    // Modal
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24
+    },
+    modalContent: {
+        width: '100%',
+        backgroundColor: '#1F2937',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#374151',
+        padding: 16
+    },
+    modalTitle: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        fontWeight: '900',
+        letterSpacing: 1,
+        marginBottom: 14,
+        textAlign: 'center'
+    },
+    modalOption: {
+        backgroundColor: '#111827',
+        padding: 14,
+        borderRadius: 10,
+        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: '#374151'
+    },
+    modalOptionActive: {
+        backgroundColor: '#2563EB',
+        borderColor: '#FFFFFF',
+        borderWidth: 1.5
+    },
+    modalOptionActiveReView: {
+        backgroundColor: '#064E3B',
+        borderColor: '#10B981',
+        borderWidth: 1.5
+    },
+    modalOptionText: {
+        color: '#FFFFFF',
+        fontSize: 14,
+        fontWeight: '800',
+        flexShrink: 1
+    },
+    modalDeckRow: {
+        flexDirection: 'row',
+        alignItems: 'center'
+    },
+    modalDeckDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 8
+    },
+
+    // Review workspace
+    reviewWorkspace: {
+        flex: 1,
+        gap: 12
+    },
+    flashcardShell: {
+        flex: 1,
+        backgroundColor: '#1F2937',
+        borderRadius: 22,
+        borderWidth: 1.5,
+        overflow: 'hidden',
+        shadowColor: '#000000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+        elevation: 6
+    },
+    flashcardShellReView: {
+        backgroundColor: '#0F241E',
+        borderColor: '#10B981',
+        shadowColor: '#10B981',
+        shadowOpacity: 0.20
+    },
+
+    // Metadata panel
+    flashcardMetaPanel: {
+        paddingHorizontal: 16,
+        paddingTop: 16,
+        paddingBottom: 12,
+        backgroundColor: 'rgba(17, 24, 39, 0.45)'
+    },
+    metaTopRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 10
+    },
+    deckIdentityRow: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginRight: 8
+    },
+    deckColorDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 8
+    },
+    deckLabelCode: {
+        fontSize: 12,
+        fontWeight: '900',
+        textTransform: 'uppercase',
+        flex: 1,
+        letterSpacing: 0.5
+    },
+    sidePill: {
+        backgroundColor: '#111827',
+        borderColor: '#374151',
+        borderWidth: 1,
+        borderRadius: 999,
+        paddingVertical: 5,
+        paddingHorizontal: 11
+    },
+    sidePillReView: {
+        backgroundColor: 'rgba(16, 185, 129, 0.16)',
+        borderColor: '#10B981'
+    },
+    sidePillText: {
+        color: '#F3F4F6',
+        fontSize: 10,
+        fontWeight: '900',
+        letterSpacing: 1
+    },
+    sidePillTextReView: {
+        color: '#D1FAE5'
+    },
+    metaBottomRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 10
+    },
+    cardTypePill: {
+        backgroundColor: '#111827',
+        borderWidth: 1.5,
+        borderRadius: 999,
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        maxWidth: '65%'
+    },
+    cardTypePillReView: {
+        backgroundColor: 'rgba(16, 185, 129, 0.14)',
+        borderColor: '#10B981'
+    },
+    cardTypePillText: {
+        color: '#FFFFFF',
+        fontSize: 11,
+        fontWeight: '900',
+        textTransform: 'uppercase',
+        letterSpacing: 0.7
+    },
+    cardTypePillTextReView: {
+        color: '#D1FAE5'
+    },
+    trackerIndexLabel: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '800'
+    },
+    trackerIndexLabelReView: {
+        color: '#A7F3D0'
+    },
+    flashcardDivider: {
+        height: 1,
+        opacity: 0.35
+    },
+
+    // Card body
+    flashcardBodyScroller: {
+        flex: 1
+    },
+    flashcardBodyContent: {
+        flexGrow: 1,
+        paddingHorizontal: 24,
+        paddingVertical: 24
+    },
+    flashcardBodyContentCentered: {
+        justifyContent: 'center'
+    },
+    flashcardBodyContentTop: {
+        justifyContent: 'flex-start'
+    },
+    payloadBlock: {
+        width: '100%'
+    },
+    centeredPayloadText: {
+        textAlign: 'center',
+        alignSelf: 'center'
+    },
+    frontText: {
+        color: '#FFFFFF',
+        fontSize: 25,
+        fontWeight: '800',
+        lineHeight: 34,
+        textAlign: 'left',
+        letterSpacing: 0.1
+    },
+    answerSectionLabel: {
+        color: '#9CA3AF',
+        fontSize: 11,
+        fontWeight: '900',
+        letterSpacing: 1.2,
+        marginBottom: 10,
+        textTransform: 'uppercase',
+        textAlign: 'left'
+    },
+    backText: {
+        color: '#E5E7EB',
+        fontSize: 20,
+        fontWeight: '600',
+        lineHeight: 30,
+        textAlign: 'left'
+    },
+    notesBlockQuote: {
+        borderLeftWidth: 3,
+        paddingLeft: 12,
+        marginTop: 18,
+        paddingVertical: 8,
+        paddingRight: 10,
+        backgroundColor: 'rgba(17, 24, 39, 0.32)',
+        borderRadius: 10
+    },
+    notesBlockCompact: {
+        borderLeftWidth: 0,
+        paddingLeft: 10,
+        paddingRight: 10
+    },
+    notesSectionLabel: {
+        color: '#9CA3AF',
+        fontSize: 10,
+        fontWeight: '900',
+        letterSpacing: 1,
+        marginBottom: 6,
+        textTransform: 'uppercase'
+    },
+    notesOutputText: {
+        color: '#CBD5E1',
+        fontSize: 14,
+        fontStyle: 'italic',
+        lineHeight: 21,
+        textAlign: 'left'
+    },
+
+    // Action controls
+    revealButton: {
+        minHeight: 56,
+        backgroundColor: '#111827',
+        borderRadius: 16,
+        borderWidth: 1.5,
+        borderStyle: 'dashed',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 16
+    },
+    revealButtonReView: {
+        backgroundColor: 'rgba(16, 185, 129, 0.14)',
+        borderColor: '#10B981'
+    },
+    revealActionLabel: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '900',
+        textAlign: 'center',
+        letterSpacing: 0.2
+    },
+    revealActionLabelReView: {
+        color: '#D1FAE5'
+    },
+    srsButtonRatingRow: {
+        flexDirection: 'row',
+        gap: 7,
+        minHeight: 54
+    },
+    ratingBtn: {
+        flex: 1,
+        borderRadius: 14,
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderWidth: 1,
+        borderBottomWidth: 3,
+        borderBottomColor: 'rgba(0,0,0,0.25)',
+        paddingHorizontal: 2
+    },
+    ratingBtnAgain: {
+        backgroundColor: '#EF4444',
+        borderColor: '#F87171'
+    },
+    ratingBtnHard: {
+        backgroundColor: '#F59E0B',
+        borderColor: '#FBBF24'
+    },
+    ratingBtnGood: {
+        backgroundColor: '#2563EB',
+        borderColor: '#60A5FA'
+    },
+    ratingBtnEasy: {
+        backgroundColor: '#10B981',
+        borderColor: '#34D399'
+    },
+    ratingBtnText: {
+        color: '#FFFFFF',
+        fontWeight: '900',
+        fontSize: 12,
+        textAlign: 'center',
+        textShadowColor: 'rgba(0, 0, 0, 0.35)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 2
+    },
+    readOnlyNextButton: {
+        backgroundColor: '#10B981',
+        minHeight: 54,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#34D399',
+        borderBottomWidth: 3,
+        borderBottomColor: 'rgba(0,0,0,0.25)'
+    },
+    readOnlyNextButtonText: {
+        color: '#FFFFFF',
+        fontWeight: '900',
+        fontSize: 15
+    },
+
+    // Empty state
+    emptyStateContainer: {
+        flex: 1,
+        backgroundColor: '#1F2937',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#374151',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 32
+    },
+    clearedIcon: {
+        fontSize: 44,
+        marginBottom: 14
+    },
+    clearedPrimaryText: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: 'bold',
+        marginBottom: 6
+    },
+    clearedSecondaryText: {
+        color: '#9CA3AF',
+        fontSize: 13,
+        textAlign: 'center',
+        lineHeight: 18
+    }
 });
