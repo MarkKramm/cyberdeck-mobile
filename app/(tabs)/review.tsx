@@ -1,6 +1,17 @@
-import { DbCard, DbDeck, getAllDecks, getDueCards, rateCard } from '@/src/database';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { DbCard, DbDeck, getAllDecks, getDueCards, logReViewPractice, rateCard } from '@/src/database';
+import { useEffect, useRef, useState } from 'react';
+import {
+    ActivityIndicator,
+    Animated,
+    Easing,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View
+} from 'react-native';
 
 export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     const [decks, setDecks] = useState<DbDeck[]>([]);
@@ -10,9 +21,35 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     const [showAnswer, setShowAnswer] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
     const [isPickerVisible, setIsPickerVisible] = useState(false);
+    const [isAdvancing, setIsAdvancing] = useState(false);
 
     // Non-destructive practice mode flag.
     const [isReViewMode, setIsReViewMode] = useState(false);
+
+    // Flip animation: 0 = front side, 1 = back side.
+    const flipAnim = useRef(new Animated.Value(0)).current;
+
+    // Stack transition animation: used only when moving to the next card.
+    // This prevents the front side from flashing for a split second after rating a card.
+    const cardTransitionAnim = useRef(new Animated.Value(1)).current;
+
+    function resetCardSide() {
+        flipAnim.stopAnimation();
+        flipAnim.setValue(0);
+        setShowAnswer(false);
+    }
+
+    function revealAnswer() {
+        if (showAnswer) return;
+
+        setShowAnswer(true);
+        Animated.timing(flipAnim, {
+            toValue: 1,
+            duration: 320,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true
+        }).start();
+    }
 
     async function refreshReviewQueue(deckFilter: string, reViewActive: boolean) {
         setIsLoading(true);
@@ -31,11 +68,14 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
             setDecks(activeDecks);
             setDueCards(targetedDueQueue);
             setCurrentIndex(0);
-            setShowAnswer(false);
+            resetCardSide();
+            cardTransitionAnim.setValue(1);
+            setIsAdvancing(false);
         } catch (error) {
             console.error('Error fetching review queue data:', error);
         } finally {
             setIsLoading(false);
+            setIsAdvancing(false);
         }
     }
 
@@ -46,29 +86,72 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     }, [isFocused, selectedDeckIdFilter, isReViewMode]);
 
     function handleFilterPress(id: string) {
+        setIsAdvancing(false);
         setSelectedDeckIdFilter(id);
         setIsPickerVisible(false);
     }
 
     async function handleScoreCard(rating: 'again' | 'hard' | 'good' | 'easy') {
         const activeCard = dueCards[currentIndex];
-        if (!activeCard) return;
+        if (!activeCard || isAdvancing) return;
 
-        await rateCard(activeCard.id, rating);
-        advanceQueue();
-    }
+        setIsAdvancing(true);
 
-    function handleReViewNext() {
-        advanceQueue();
-    }
-
-    function advanceQueue() {
-        if (currentIndex < dueCards.length - 1) {
-            setCurrentIndex(currentIndex + 1);
-            setShowAnswer(false);
-        } else {
-            refreshReviewQueue(selectedDeckIdFilter, isReViewMode);
+        try {
+            await rateCard(activeCard.id, rating);
+            transitionToNextCard();
+        } catch (error) {
+            console.error('Error rating card:', error);
+            setIsAdvancing(false);
         }
+    }
+
+    async function handleReViewNext() {
+        const activeCard = dueCards[currentIndex];
+        if (!activeCard || isAdvancing) return;
+
+        setIsAdvancing(true);
+
+        try {
+            // Re-View is non-destructive: it logs practice only, without changing due_at or SRS interval.
+            await logReViewPractice(activeCard.id);
+            transitionToNextCard();
+        } catch (error) {
+            console.error('Error logging Re-View practice:', error);
+            setIsAdvancing(false);
+        }
+    }
+
+    function transitionToNextCard() {
+        Animated.timing(cardTransitionAnim, {
+            toValue: 0,
+            duration: 170,
+            easing: Easing.in(Easing.cubic),
+            useNativeDriver: true
+        }).start(() => {
+            // The old card is now invisible, so it is safe to reset the flip state.
+            // This is the key part that prevents the quick front-card flash.
+            if (currentIndex < dueCards.length - 1) {
+                setCurrentIndex((previousIndex) => previousIndex + 1);
+                resetCardSide();
+
+                cardTransitionAnim.setValue(0);
+                requestAnimationFrame(() => {
+                    Animated.timing(cardTransitionAnim, {
+                        toValue: 1,
+                        duration: 230,
+                        easing: Easing.out(Easing.cubic),
+                        useNativeDriver: true
+                    }).start(() => {
+                        setIsAdvancing(false);
+                    });
+                });
+            } else {
+                resetCardSide();
+                cardTransitionAnim.setValue(1);
+                refreshReviewQueue(selectedDeckIdFilter, isReViewMode);
+            }
+        });
     }
 
     if (isLoading) {
@@ -82,7 +165,7 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     const currentCard = dueCards[currentIndex];
 
     const currentFilteredDeckObj = decks.find(d => String(d.id) === selectedDeckIdFilter);
-    const isSelectedDeckEmpty = selectedDeckIdFilter !== 'All' && currentFilteredDeckObj && (!dueCards.length && !currentCard);
+    const isSelectedDeckEmpty = isReViewMode && selectedDeckIdFilter !== 'All' && currentFilteredDeckObj && (!dueCards.length && !currentCard);
 
     const currentDeckName = selectedDeckIdFilter === 'All' ? 'All Decks' : (currentFilteredDeckObj?.name || 'Unknown Deck');
 
@@ -98,19 +181,42 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
             ? '#1F2937'
             : (currentFilteredDeckObj?.color || '#1F2937');
 
-    const visibleMainText = showAnswer ? (currentCard?.back || '') : (currentCard?.front || '');
-    const visibleNotesText = showAnswer ? (currentCard?.notes || '') : '';
-    const payloadLength = visibleMainText.length + visibleNotesText.length;
+    const frontText = currentCard?.front || '';
+    const backText = currentCard?.back || '';
+    const notesText = currentCard?.notes || '';
+    const frontLength = frontText.length;
+    const backLength = backText.length + notesText.length;
 
-    // Short cards should feel like real flashcards.
-    // Long cards should start near the top and scroll naturally.
-    const isCompactPayload = payloadLength <= 160;
-    const isMediumPayload = payloadLength > 160 && payloadLength <= 420;
-    const shouldCenterPayload = isCompactPayload || isMediumPayload;
-    const shouldCenterMainText = isCompactPayload;
+    const shouldCenterFrontPayload = frontLength <= 160;
+    const shouldCenterBackPayload = backLength <= 420;
+    const shouldCenterFrontText = frontLength <= 160;
+    const shouldCenterBackText = backLength <= 160;
     const hasNotes = Boolean(currentCard?.notes && currentCard.notes.trim().length > 0);
 
-    const sideLabel = showAnswer ? 'BACK' : 'FRONT';
+    const frontRotation = flipAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['0deg', '180deg']
+    });
+
+    const backRotation = flipAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: ['180deg', '360deg']
+    });
+
+    const cardTransitionOpacity = cardTransitionAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1]
+    });
+
+    const cardTransitionTranslateY = cardTransitionAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-18, 0]
+    });
+
+    const cardTransitionScale = cardTransitionAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.985, 1]
+    });
 
     return (
         <View style={styles.screenWrapper}>
@@ -141,16 +247,16 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                     { backgroundColor: dropdownBackground },
                     isReViewMode
                         ? styles.dropdownTriggerReView
-                        : selectedDeckIdFilter !== 'All'
-                            ? { borderColor: '#FFFFFF', borderWidth: 1.5 }
-                            : null
+                        : selectedDeckIdFilter === 'All'
+                            ? styles.dropdownTriggerAllDecks
+                            : styles.dropdownTriggerSelectedDeck
                 ]}
                 onPress={() => setIsPickerVisible(true)}
             >
                 <Text style={styles.dropdownTriggerText} numberOfLines={1}>
                     Deck 📚: {currentDeckName}
                 </Text>
-                <Text style={[styles.dropdownArrow, isReViewMode && styles.dropdownArrowReView]}>▼</Text>
+                <Text style={styles.dropdownArrow}>▼</Text>
             </TouchableOpacity>
 
             {isReViewMode && (
@@ -213,102 +319,149 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                         {isSelectedDeckEmpty
                             ? 'There are no cards in this deck yet. Add cards to get started.'
                             : isReViewMode
-                                ? 'No cards found for this deck. Add cards first.'
-                                : 'All due cards are caught up. Turn on Re-View Mode to practice ahead of schedule.'}
+                                ? 'No cards found. Add cards first.'
+                                : selectedDeckIdFilter !== 'All'
+                                    ? 'This deck has no due cards right now. Turn on Re-View Mode to practice it anyway.'
+                                    : 'All due cards are caught up. Turn on Re-View Mode to practice ahead of schedule.'}
                     </Text>
                 </View>
             ) : (
                 <View style={styles.reviewWorkspace}>
-                    {/* Unified Flashcard */}
-                    <View
+                    <Animated.View
                         style={[
-                            styles.flashcardShell,
-                            { borderColor: activeCardAccent },
-                            isReViewMode && styles.flashcardShellReView
+                            styles.animatedCardStack,
+                            {
+                                opacity: cardTransitionOpacity,
+                                transform: [
+                                    { translateY: cardTransitionTranslateY },
+                                    { scale: cardTransitionScale }
+                                ]
+                            }
                         ]}
                     >
-                        {/* Top metadata: deck + front/back indicator */}
-                        <View style={styles.flashcardMetaPanel}>
-                            <View style={styles.metaTopRow}>
+                        {/* Unified Flashcard */}
+                        <View
+                            style={[
+                                styles.flashcardShell,
+                                { borderColor: activeCardAccent },
+                                isReViewMode && styles.flashcardShellReView
+                            ]}
+                        >
+                            {/* Metadata: long deck names can wrap normally here */}
+                            <View style={styles.flashcardMetaPanel}>
                                 <View style={styles.deckIdentityRow}>
                                     <View style={[styles.deckColorDot, { backgroundColor: deckAccentColor }]} />
-                                    <Text style={[styles.deckLabelCode, { color: activeCardAccent }]} numberOfLines={1}>
+                                    <Text style={[styles.deckLabelCode, { color: activeCardAccent }]}>
                                         {currentCard?.deck_name || 'Unknown Deck'}
                                     </Text>
                                 </View>
 
-                                <View style={[styles.sidePill, isReViewMode && styles.sidePillReView]}>
-                                    <Text style={[styles.sidePillText, isReViewMode && styles.sidePillTextReView]}>
-                                        [{sideLabel}]
+                                <View style={styles.metaBottomRow}>
+                                    <View style={[
+                                        styles.cardTypePill,
+                                        { borderColor: activeCardAccent },
+                                        isReViewMode && styles.cardTypePillReView
+                                    ]}>
+                                        <Text style={[styles.cardTypePillText, isReViewMode && styles.cardTypePillTextReView]}>
+                                            {currentCard?.card_type || 'Card'}
+                                        </Text>
+                                    </View>
+
+                                    <Text style={[styles.trackerIndexLabel, isReViewMode && styles.trackerIndexLabelReView]}>
+                                        Card(s): {currentIndex + 1} / {dueCards.length}
                                     </Text>
                                 </View>
                             </View>
 
-                            {/* Second metadata row: card type + counter */}
-                            <View style={styles.metaBottomRow}>
-                                <View style={[
-                                    styles.cardTypePill,
-                                    { borderColor: activeCardAccent },
-                                    isReViewMode && styles.cardTypePillReView
-                                ]}>
-                                    <Text style={[styles.cardTypePillText, isReViewMode && styles.cardTypePillTextReView]}>
-                                        {currentCard?.card_type || 'Card'}
-                                    </Text>
-                                </View>
+                            <View style={[styles.flashcardDivider, { backgroundColor: activeCardAccent }]} />
 
-                                <Text style={[styles.trackerIndexLabel, isReViewMode && styles.trackerIndexLabelReView]}>
-                                    Card(s): {currentIndex + 1} / {dueCards.length}
-                                </Text>
-                            </View>
-                        </View>
-
-                        <View style={[styles.flashcardDivider, { backgroundColor: activeCardAccent }]} />
-
-                        {/* Card body */}
-                        <ScrollView
-                            style={styles.flashcardBodyScroller}
-                            contentContainerStyle={[
-                                styles.flashcardBodyContent,
-                                shouldCenterPayload ? styles.flashcardBodyContentCentered : styles.flashcardBodyContentTop
-                            ]}
-                            showsVerticalScrollIndicator={false}
-                        >
-                            {!showAnswer ? (
-                                <View style={styles.payloadBlock}>
-                                    <Text style={[styles.frontText, shouldCenterMainText && styles.centeredPayloadText]}>
-                                        {currentCard?.front}
-                                    </Text>
-                                </View>
-                            ) : (
-                                <View style={styles.payloadBlock}>
-                                    <Text style={[styles.answerSectionLabel, shouldCenterMainText && styles.centeredPayloadText]}>
-                                        [ ANSWER ]
-                                    </Text>
-
-                                    <Text style={[styles.backText, shouldCenterMainText && styles.centeredPayloadText]}>
-                                        {currentCard?.back}
-                                    </Text>
-
-                                    {hasNotes ? (
-                                        <View
-                                            style={[
-                                                styles.notesBlockQuote,
-                                                { borderLeftColor: activeCardAccent },
-                                                shouldCenterMainText && styles.notesBlockCompact
-                                            ]}
-                                        >
-                                            <Text style={[styles.notesSectionLabel, shouldCenterMainText && styles.centeredPayloadText]}>
-                                                [ ADDITIONAL NOTES ]
-                                            </Text>
-                                            <Text style={[styles.notesOutputText, shouldCenterMainText && styles.centeredPayloadText]}>
-                                                {currentCard.notes}
+                            {/* Flip stage: front and back are both present, then rotate */}
+                            <View style={styles.flipStage}>
+                                <Animated.View
+                                    pointerEvents={showAnswer ? 'none' : 'auto'}
+                                    style={[
+                                        styles.cardFace,
+                                        {
+                                            transform: [
+                                                { perspective: 1000 },
+                                                { rotateY: frontRotation }
+                                            ]
+                                        }
+                                    ]}
+                                >
+                                    <ScrollView
+                                        style={styles.flashcardBodyScroller}
+                                        contentContainerStyle={[
+                                            styles.flashcardBodyContent,
+                                            shouldCenterFrontPayload ? styles.flashcardBodyContentCentered : styles.flashcardBodyContentTop
+                                        ]}
+                                        showsVerticalScrollIndicator={false}
+                                    >
+                                        <View style={styles.payloadBlock}>
+                                            <Text style={[styles.frontText, shouldCenterFrontText && styles.centeredPayloadText]}>
+                                                {currentCard?.front}
                                             </Text>
                                         </View>
-                                    ) : null}
-                                </View>
-                            )}
-                        </ScrollView>
-                    </View>
+                                    </ScrollView>
+                                </Animated.View>
+
+                                <Animated.View
+                                    pointerEvents={showAnswer ? 'auto' : 'none'}
+                                    style={[
+                                        styles.cardFace,
+                                        styles.backFace,
+                                        {
+                                            transform: [
+                                                { perspective: 1000 },
+                                                { rotateY: backRotation }
+                                            ]
+                                        }
+                                    ]}
+                                >
+                                    <ScrollView
+                                        style={styles.flashcardBodyScroller}
+                                        contentContainerStyle={[
+                                            styles.flashcardBodyContent,
+                                            shouldCenterBackPayload ? styles.flashcardBodyContentCentered : styles.flashcardBodyContentTop
+                                        ]}
+                                        showsVerticalScrollIndicator={false}
+                                    >
+                                        <View style={styles.payloadBlock}>
+                                            <Text style={[styles.answerSectionLabel, shouldCenterBackText && styles.centeredPayloadText]}>
+                                                [ ANSWER ]
+                                            </Text>
+
+                                            <Text style={[styles.backText, shouldCenterBackText && styles.centeredPayloadText]}>
+                                                {currentCard?.back}
+                                            </Text>
+
+                                            {hasNotes ? (
+                                                <View
+                                                    style={[
+                                                        styles.notesBlockQuote,
+                                                        { borderLeftColor: activeCardAccent },
+                                                        shouldCenterBackText && styles.notesBlockCompact
+                                                    ]}
+                                                >
+                                                    <Text style={[styles.notesSectionLabel, shouldCenterBackText && styles.centeredPayloadText]}>
+                                                        [ ADDITIONAL NOTES ]
+                                                    </Text>
+                                                    <Text style={[styles.notesOutputText, shouldCenterBackText && styles.centeredPayloadText]}>
+                                                        {currentCard.notes}
+                                                    </Text>
+                                                </View>
+                                            ) : null}
+                                        </View>
+                                    </ScrollView>
+                                </Animated.View>
+                            </View>
+
+                            {/* Side hint footer */}
+                            <Text style={styles.cardSideFooter}>
+                                {showAnswer ? '[ Back ]' : '[ Front ]'}
+                            </Text>
+                        </View>
+                    </Animated.View>
 
                     {/* Action Controls */}
                     {!showAnswer ? (
@@ -318,7 +471,8 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                                 { borderColor: activeCardAccent },
                                 isReViewMode && styles.revealButtonReView
                             ]}
-                            onPress={() => setShowAnswer(true)}
+                            onPress={revealAnswer}
+                            disabled={isAdvancing}
                         >
                             <Text style={[styles.revealActionLabel, isReViewMode && styles.revealActionLabelReView]}>
                                 Reveal Answer
@@ -326,21 +480,41 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                         </TouchableOpacity>
                     ) : !isReViewMode ? (
                         <View style={styles.srsButtonRatingRow}>
-                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnAgain]} onPress={() => handleScoreCard('again')}>
+                            <TouchableOpacity
+                                style={[styles.ratingBtn, styles.ratingBtnAgain, isAdvancing && styles.actionButtonDisabled]}
+                                onPress={() => handleScoreCard('again')}
+                                disabled={isAdvancing}
+                            >
                                 <Text style={styles.ratingBtnText}>😵 Again</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnHard]} onPress={() => handleScoreCard('hard')}>
+                            <TouchableOpacity
+                                style={[styles.ratingBtn, styles.ratingBtnHard, isAdvancing && styles.actionButtonDisabled]}
+                                onPress={() => handleScoreCard('hard')}
+                                disabled={isAdvancing}
+                            >
                                 <Text style={styles.ratingBtnText}>🤔 Hard</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnGood]} onPress={() => handleScoreCard('good')}>
+                            <TouchableOpacity
+                                style={[styles.ratingBtn, styles.ratingBtnGood, isAdvancing && styles.actionButtonDisabled]}
+                                onPress={() => handleScoreCard('good')}
+                                disabled={isAdvancing}
+                            >
                                 <Text style={styles.ratingBtnText}>👍 Good</Text>
                             </TouchableOpacity>
-                            <TouchableOpacity style={[styles.ratingBtn, styles.ratingBtnEasy]} onPress={() => handleScoreCard('easy')}>
+                            <TouchableOpacity
+                                style={[styles.ratingBtn, styles.ratingBtnEasy, isAdvancing && styles.actionButtonDisabled]}
+                                onPress={() => handleScoreCard('easy')}
+                                disabled={isAdvancing}
+                            >
                                 <Text style={styles.ratingBtnText}>🚀 Easy</Text>
                             </TouchableOpacity>
                         </View>
                     ) : (
-                        <TouchableOpacity style={styles.readOnlyNextButton} onPress={handleReViewNext}>
+                        <TouchableOpacity
+                            style={[styles.readOnlyNextButton, isAdvancing && styles.actionButtonDisabled]}
+                            onPress={handleReViewNext}
+                            disabled={isAdvancing}
+                        >
                             <Text style={styles.readOnlyNextButtonText}>Next Card</Text>
                         </TouchableOpacity>
                     )}
@@ -406,13 +580,17 @@ const styles = StyleSheet.create({
         paddingVertical: 12,
         paddingHorizontal: 16,
         borderRadius: 14,
-        borderWidth: 1,
-        borderColor: '#ffffff',
+        borderWidth: 1.5,
         marginBottom: 18
     },
+    dropdownTriggerAllDecks: {
+        borderColor: '#FFFFFF'
+    },
+    dropdownTriggerSelectedDeck: {
+        borderColor: '#FFFFFF'
+    },
     dropdownTriggerReView: {
-        borderColor: '#10B981',
-        borderWidth: 1.5
+        borderColor: '#10B981'
     },
     dropdownTriggerText: {
         color: '#FFFFFF',
@@ -421,12 +599,10 @@ const styles = StyleSheet.create({
         flex: 1
     },
     dropdownArrow: {
-        color: '#9CA3AF',
+        color: '#FFFFFF',
         fontSize: 12,
-        marginLeft: 8
-    },
-    dropdownArrowReView: {
-        color: '#A7F3D0'
+        marginLeft: 8,
+        fontWeight: '900'
     },
 
     // Re-View Mode identity banner
@@ -519,6 +695,9 @@ const styles = StyleSheet.create({
         flex: 1,
         gap: 12
     },
+    animatedCardStack: {
+        flex: 1
+    },
     flashcardShell: {
         flex: 1,
         backgroundColor: '#1F2937',
@@ -545,51 +724,26 @@ const styles = StyleSheet.create({
         paddingBottom: 12,
         backgroundColor: 'rgba(17, 24, 39, 0.45)'
     },
-    metaTopRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 10
-    },
     deckIdentityRow: {
-        flex: 1,
         flexDirection: 'row',
-        alignItems: 'center',
-        marginRight: 8
+        alignItems: 'flex-start',
+        width: '100%',
+        marginBottom: 10
     },
     deckColorDot: {
         width: 8,
         height: 8,
         borderRadius: 4,
-        marginRight: 8
+        marginRight: 8,
+        marginTop: 5
     },
     deckLabelCode: {
         fontSize: 12,
         fontWeight: '900',
         textTransform: 'uppercase',
         flex: 1,
-        letterSpacing: 0.5
-    },
-    sidePill: {
-        backgroundColor: '#111827',
-        borderColor: '#374151',
-        borderWidth: 1,
-        borderRadius: 999,
-        paddingVertical: 5,
-        paddingHorizontal: 11
-    },
-    sidePillReView: {
-        backgroundColor: 'rgba(16, 185, 129, 0.16)',
-        borderColor: '#10B981'
-    },
-    sidePillText: {
-        color: '#F3F4F6',
-        fontSize: 10,
-        fontWeight: '900',
-        letterSpacing: 1
-    },
-    sidePillTextReView: {
-        color: '#D1FAE5'
+        letterSpacing: 0.5,
+        lineHeight: 17
     },
     metaBottomRow: {
         flexDirection: 'row',
@@ -630,6 +784,19 @@ const styles = StyleSheet.create({
     flashcardDivider: {
         height: 1,
         opacity: 0.35
+    },
+
+    // Flip stage
+    flipStage: {
+        flex: 1,
+        position: 'relative'
+    },
+    cardFace: {
+        ...StyleSheet.absoluteFillObject,
+        backfaceVisibility: 'hidden'
+    },
+    backFace: {
+        backfaceVisibility: 'hidden'
     },
 
     // Card body
@@ -708,6 +875,18 @@ const styles = StyleSheet.create({
         textAlign: 'left'
     },
 
+    // Side hint footer
+    cardSideFooter: {
+        color: '#6B7280',
+        fontSize: 11,
+        fontWeight: '900',
+        letterSpacing: 1,
+        textAlign: 'center',
+        textTransform: 'uppercase',
+        paddingVertical: 10,
+        backgroundColor: 'rgba(17, 24, 39, 0.35)'
+    },
+
     // Action controls
     revealButton: {
         minHeight: 56,
@@ -783,6 +962,9 @@ const styles = StyleSheet.create({
         borderColor: '#34D399',
         borderBottomWidth: 3,
         borderBottomColor: 'rgba(0,0,0,0.25)'
+    },
+    actionButtonDisabled: {
+        opacity: 0.55
     },
     readOnlyNextButtonText: {
         color: '#FFFFFF',
