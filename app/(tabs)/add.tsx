@@ -105,10 +105,10 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
             }
 
             if (dbDecks.length > 0) {
-                const selectedStillExists = selectedDeckId !== null && dbDecks.some(deck => Number(deck.id) === selectedDeckId);
-                if (!selectedStillExists) {
-                    setSelectedDeckId(Number(dbDecks[0].id));
-                }
+                setSelectedDeckId(prev => {
+                    const selectedStillExists = prev !== null && dbDecks.some(deck => Number(deck.id) === prev);
+                    return selectedStillExists ? prev : Number(dbDecks[0].id);
+                });
             } else {
                 setSelectedDeckId(null);
             }
@@ -116,7 +116,7 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
             console.error(e);
             Alert.alert('Deck Load Error', 'Could not load your decks.');
         }
-    }, [selectedDeckId]);
+    }, []);
 
     useEffect(() => {
         if (isFocused) {
@@ -145,16 +145,17 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
             return;
         }
 
-        try {
-            setIsCreatingDeck(true);
+        setIsCreatingDeck(true);
 
+        try {
             const currentDecks = await getAllDecks();
             if (currentDecks.some(d => d.name.trim().toLowerCase() === cleanedName.toLowerCase())) {
                 Alert.alert('Naming Conflict', 'A deck with that title already exists.');
+                setIsCreatingDeck(false); // Fix Bug #1: Reset flag on naming conflict early return
                 return;
             }
 
-            await createDeck(cleanedName, cleanedDesc, newDeckColor);
+            await createDeck(cleanedName, cleanedDesc || null, newDeckColor);
 
             const updatedDecks = await getAllDecks();
             const newlyCreated = updatedDecks.find(d => d.name.trim().toLowerCase() === cleanedName.toLowerCase());
@@ -196,13 +197,17 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
         try {
             setIsSavingCard(true);
 
+            // Fix Bug #5: Cast empty strings to explicit nulls so empty placeholder rows aren't rendered
+            const cleanedTags = tags.trim();
+            const cleanedNotes = notes.trim();
+
             await saveCard(
                 Number(selectedDeckId),
                 selectedType,
                 front.trim(),
                 back.trim(),
-                tags.trim(),
-                notes.trim()
+                cleanedTags || null,
+                cleanedNotes || null
             );
 
             Keyboard.dismiss();
@@ -224,7 +229,6 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
         if (isCreatingDeck) return;
         setIsModalVisible(false);
     }
-
 
     const saveButtonLabel = isSavingCard
         ? 'Saving...'
@@ -295,7 +299,7 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                                             <Text style={styles.modalEmptyText}>No decks yet. Create one first.</Text>
                                         </View>
                                     ) : decks.map((deck) => {
-                                        const isCurrentSelected = selectedDeckId === deck.id;
+                                        const isCurrentSelected = selectedDeckId === Number(deck.id);
 
                                         return (
                                             <TouchableOpacity
@@ -429,7 +433,6 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                             />
                         </View>
                     </View>
-
                 </View>
 
                 <Modal visible={isModalVisible} transparent animationType="slide" onRequestClose={closeCustomDeckModal}>
@@ -582,7 +585,6 @@ const styles = StyleSheet.create({
         lineHeight: 17,
         marginTop: 4
     },
-
     dropdownTrigger: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -618,7 +620,6 @@ const styles = StyleSheet.create({
         marginTop: 10,
         textAlign: 'center'
     },
-
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.85)',
@@ -632,6 +633,14 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#374151',
         padding: 16
+    },
+    modalTitle: {
+        color: '#9CA3AF',
+        fontSize: 12,
+        fontWeight: '900',
+        letterSpacing: 1,
+        marginBottom: 14,
+        textAlign: 'center'
     },
     modalOption: {
         backgroundColor: '#111827',
@@ -656,11 +665,11 @@ const styles = StyleSheet.create({
         textAlign: 'center'
     },
     modalOptionTextSelected: {
-        color: '#111827',
+        color: '#FFFFFF', // Fix Bug #7: Text is now beautifully white when highlighted on colorful decks
         fontWeight: '900'
     },
     modalOptionSubTextSelected: {
-        color: '#111827',
+        color: '#E5E7EB', // Fix Bug #7: Subtext is now highly readable light gray
         fontWeight: '800'
     },
     modalEmptyBox: {
@@ -675,7 +684,6 @@ const styles = StyleSheet.create({
         fontSize: 13,
         textAlign: 'center'
     },
-
     selectorScroll: { flexDirection: 'row', marginTop: 12 },
     selectorContent: { paddingRight: 6 },
     selectorItem: {
@@ -693,7 +701,6 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         fontSize: 14
     },
-
     inputCard: {
         backgroundColor: '#1F2937',
         borderRadius: 18,
@@ -774,7 +781,6 @@ const styles = StyleSheet.create({
         minHeight: 120,
         lineHeight: 23
     },
-
     button: {
         padding: 18,
         borderRadius: 16,
@@ -847,7 +853,6 @@ const styles = StyleSheet.create({
         fontSize: 16,
         textAlign: 'center'
     },
-
     modalBox: {
         backgroundColor: '#1F2937',
         borderRadius: 20,

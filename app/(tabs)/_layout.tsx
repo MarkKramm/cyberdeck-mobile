@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DeviceEventEmitter, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import PagerView from 'react-native-pager-view';
 
@@ -15,12 +15,12 @@ export default function TabLayout() {
   const [activeIndex, setActiveIndex] = useState(0);
   const pagerRef = useRef<PagerView>(null);
 
-  function goToTab(index: number) {
+  const goToTab = useCallback((index: number) => {
     if (index < 0 || index >= TAB_COUNT) return;
 
     setActiveIndex(index);
     pagerRef.current?.setPage(index);
-  }
+  }, []);
 
   function handlePageSelect(e: any) {
     const nextIndex = Number(e?.nativeEvent?.position);
@@ -36,7 +36,7 @@ export default function TabLayout() {
     });
 
     return () => tabSubscription.remove();
-  }, []);
+  }, [goToTab]);
 
   function renderTab(index: number, iconName: keyof typeof Ionicons.glyphMap, label: string) {
     const isActive = activeIndex === index;

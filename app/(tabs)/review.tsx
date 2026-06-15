@@ -63,7 +63,7 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                 setSelectedDeckIdFilter('All');
             }
 
-            const targetedDueQueue = await getDueCards(30, activeFilter, reViewActive);
+            const targetedDueQueue = await getDueCards(100, activeFilter, reViewActive);
 
             setDecks(activeDecks);
             setDueCards(targetedDueQueue);
@@ -165,7 +165,7 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     const currentCard = dueCards[currentIndex];
 
     const currentFilteredDeckObj = decks.find(d => String(d.id) === selectedDeckIdFilter);
-    const isSelectedDeckEmpty = isReViewMode && selectedDeckIdFilter !== 'All' && currentFilteredDeckObj && (!dueCards.length && !currentCard);
+    const isSelectedDeckEmpty = selectedDeckIdFilter !== 'All' && currentFilteredDeckObj && (!dueCards.length && !currentCard);
 
     const currentDeckName = selectedDeckIdFilter === 'All' ? 'All Decks' : (currentFilteredDeckObj?.name || 'Unknown Deck');
 

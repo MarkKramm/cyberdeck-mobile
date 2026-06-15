@@ -152,7 +152,6 @@ export function initializeDatabase(): Promise<void> {
         `);
 
         // 6. Lightweight metadata table for future-safe migrations/versioning.
-        // This does not change current app behavior, but gives us a safe place to store schema version later.
         await db.execAsync(`
             CREATE TABLE IF NOT EXISTS app_metadata (
                 key TEXT PRIMARY KEY,
@@ -163,6 +162,16 @@ export function initializeDatabase(): Promise<void> {
         await db.runAsync(
             `INSERT OR IGNORE INTO app_metadata (key, value) VALUES ('schema_version', '1');`
         );
+
+        // 7. Performance indexes.
+        // IF NOT EXISTS makes these safe to run on every cold start.
+        await db.execAsync(`
+            CREATE INDEX IF NOT EXISTS idx_cards_due_at        ON cards(due_at);
+            CREATE INDEX IF NOT EXISTS idx_cards_deck_id       ON cards(deck_id);
+            CREATE INDEX IF NOT EXISTS idx_cards_difficulty    ON cards(difficulty);
+            CREATE INDEX IF NOT EXISTS idx_review_logs_card_id ON review_logs(card_id);
+            CREATE INDEX IF NOT EXISTS idx_mistakes_card_id    ON mistakes(related_card_id);
+        `);
 
         // --- SEED SELECTION SAFEGUARD ---
         const deckCheck = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM decks;');
@@ -191,9 +200,20 @@ export function initializeDatabase(): Promise<void> {
     return initializationPromise;
 }
 
-async function getReadyDatabase() {
+export async function getReadyDatabase() {
     await initializeDatabase();
     return openDatabase();
+}
+
+// --- DUE DATE HELPER ---
+// Returns midnight (00:00:00.000) of the day that is `daysFromNow` days from today.
+// This means cards always become available at 12am sharp, never mid-day.
+// Example: reviewed at 5am on Monday with interval=1 → due at 12am Tuesday, not 5am Tuesday.
+function getMidnightDue(daysFromNow: number): string {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + daysFromNow);
+    return d.toISOString();
 }
 
 // --- CRUD / FETCH OPERATIONS ---
@@ -222,19 +242,32 @@ export async function updateDeck(id: number, name: string, description: string |
     );
 }
 
+// updateDeckFull includes color so browse.tsx can call this instead of raw SQL.
+export async function updateDeckFull(id: number, name: string, description: string | null, color: string | null): Promise<void> {
+    const db = await getReadyDatabase();
+    const now = new Date().toISOString();
+
+    await db.runAsync(
+        'UPDATE decks SET name = ?, description = ?, color = ?, updated_at = ? WHERE id = ?;',
+        [name, description, color, now, id]
+    );
+}
+
 export async function deleteDeck(id: number): Promise<void> {
     const db = await getReadyDatabase();
 
-    // Explicit cleanup first, even though foreign keys are enabled.
-    // This makes deck deletion safe even if a platform ever ignores cascade behavior.
-    await db.runAsync(
-        `DELETE FROM review_logs 
-         WHERE card_id IN (SELECT id FROM cards WHERE deck_id = ?);`,
-        [id]
-    );
+    // Wrapped in a transaction so a crash mid-delete can't leave a deck without
+    // its cards, or cards without their review_logs.
+    await db.withExclusiveTransactionAsync(async () => {
+        await db.runAsync(
+            `DELETE FROM review_logs 
+             WHERE card_id IN (SELECT id FROM cards WHERE deck_id = ?);`,
+            [id]
+        );
 
-    await db.runAsync('DELETE FROM cards WHERE deck_id = ?;', [id]);
-    await db.runAsync('DELETE FROM decks WHERE id = ?;', [id]);
+        await db.runAsync('DELETE FROM cards WHERE deck_id = ?;', [id]);
+        await db.runAsync('DELETE FROM decks WHERE id = ?;', [id]);
+    });
 }
 
 export async function getAllCards(): Promise<DbCard[]> {
@@ -259,9 +292,10 @@ export async function saveCard(
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
 
+    // New cards are due immediately (midnight today) so they show up in today's queue.
     await db.runAsync(
         'INSERT INTO cards (deck_id, card_type, front, back, tags, notes, difficulty, due_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);',
-        [deckId, cardType, front, back, tags, notes, 'new', now, now, now]
+        [deckId, cardType, front, back, tags, notes, 'new', getMidnightDue(0), now, now]
     );
 }
 
@@ -286,10 +320,16 @@ export async function updateCard(
 export async function deleteCard(id: number): Promise<void> {
     const db = await getReadyDatabase();
 
-    // Explicitly clean review history first for data safety and accurate stats.
-    await db.runAsync('DELETE FROM review_logs WHERE card_id = ?;', [id]);
-    await db.runAsync('UPDATE mistakes SET related_card_id = NULL, updated_at = ? WHERE related_card_id = ?;', [new Date().toISOString(), id]);
-    await db.runAsync('DELETE FROM cards WHERE id = ?;', [id]);
+    // Wrapped in a transaction. Without this, a crash after the review_logs delete
+    // but before the cards delete would leave the card alive with wiped history.
+    await db.withExclusiveTransactionAsync(async () => {
+        await db.runAsync('DELETE FROM review_logs WHERE card_id = ?;', [id]);
+        await db.runAsync(
+            'UPDATE mistakes SET related_card_id = NULL, updated_at = ? WHERE related_card_id = ?;',
+            [new Date().toISOString(), id]
+        );
+        await db.runAsync('DELETE FROM cards WHERE id = ?;', [id]);
+    });
 }
 
 // --- OPTIMIZED QUEUE METHOD (SUPPORTS RE-VIEW OVERRIDE BYPASS) ---
@@ -299,7 +339,10 @@ export async function getDueCards(
     isReViewMode: boolean = false
 ): Promise<DbCard[]> {
     const db = await getReadyDatabase();
-    const nowStr = new Date().toISOString();
+
+    // Compare against midnight today so cards due "today" are always visible
+    // regardless of what time you open the app.
+    const todayMidnight = getMidnightDue(0);
 
     let query = `
         SELECT c.*, d.name as deck_name 
@@ -312,8 +355,14 @@ export async function getDueCards(
 
     // If Re-View is false, strictly apply spaced repetition due-date constraints.
     if (!isReViewMode) {
-        conditions.push('(c.due_at IS NULL OR c.due_at <= ?)');
-        params.push(nowStr);
+        // DATE() cast on both sides makes this comparison format-safe.
+        // getMidnightDue always produces ISO 8601 (YYYY-MM-DDTHH:MM:SS.sssZ), and
+        // SQLite string comparison works correctly for that format. The DATE() cast
+        // is a safeguard against any card whose due_at was written in a different
+        // format (e.g. a very old backup or a third-party import) — without the cast,
+        // that card would be silently skipped forever.
+        conditions.push('(c.due_at IS NULL OR DATE(c.due_at) <= DATE(?))');
+        params.push(todayMidnight);
     }
 
     if (deckFilter !== 'All') {
@@ -360,30 +409,55 @@ export async function logReViewPractice(cardId: number): Promise<void> {
     await logReviewHistory(cardId, 're-view', null);
 }
 
+// --- SRS RATING ENGINE ---
+// Intervals always land on midnight of the target day so the day boundary is
+// always 12am, not whatever time you happened to review the card.
+//
+// Algorithm summary:
+//   again → lapse penalty: new interval = max(1, floor(old_interval * 0.2)), due tomorrow
+//           This means a 30-day card comes back in 6 days, not 3 like a brand new card.
+//           A card with interval 0-4 just comes back tomorrow (min 1 day).
+//   hard  → interval + 1 floor to prevent sticking, then * 1.2 multiplier, due in result days
+//   good  → * 2.5 multiplier (3 days minimum on first review)
+//   easy  → * 4.0 multiplier (7 days minimum on first review)
 export async function rateCard(id: number, decision: 'again' | 'hard' | 'good' | 'easy'): Promise<void> {
     const db = await getReadyDatabase();
     const card = await db.getFirstAsync<DbCard>('SELECT * FROM cards WHERE id = ?;', [id]);
 
     if (!card) return;
 
-    const dueDate = new Date();
-    let nextInterval = card.interval_days;
     const newDifficulty = decision;
     const shouldIncrementLapse = decision === 'again';
 
+    let nextInterval: number;  // saved to interval_days (the springboard)
+    let daysUntilDue: number;  // passed to getMidnightDue (when you actually see it)
+
     if (decision === 'again') {
-        nextInterval = 0;
+        if (card.interval_days > 4) {
+            // Lapse penalty: preserve 20% of the old interval as the springboard so
+            // the next Good rating multiplies from there instead of restarting at 3.
+            // But force it due TOMORROW so a forgotten card is never buried for days.
+            nextInterval = Math.max(1, Math.round(card.interval_days * 0.2));
+            daysUntilDue = 1;
+        } else {
+            // Young card — just reset both.
+            nextInterval = 1;
+            daysUntilDue = 1;
+        }
     } else if (decision === 'hard') {
-        nextInterval = card.interval_days === 0 ? 1 : Math.max(1, Math.round(card.interval_days * 1.2));
+        nextInterval = card.interval_days === 0 ? 1 : Math.max(card.interval_days + 1, Math.round(card.interval_days * 1.2));
+        daysUntilDue = nextInterval;
     } else if (decision === 'good') {
+        // Use the stored interval_days as the springboard — this is what makes
+        // a lapsed card recover to 15 days (6 * 2.5) instead of restarting at 3.
         nextInterval = card.interval_days === 0 ? 3 : Math.max(1, Math.round(card.interval_days * 2.5));
-    } else if (decision === 'easy') {
+        daysUntilDue = nextInterval;
+    } else { // easy
         nextInterval = card.interval_days === 0 ? 7 : Math.max(1, Math.round(card.interval_days * 4.0));
+        daysUntilDue = nextInterval;
     }
 
-    dueDate.setDate(dueDate.getDate() + nextInterval);
-
-    const nextDueStr = dueDate.toISOString();
+    const nextDueStr = getMidnightDue(daysUntilDue);
     const tsStr = new Date().toISOString();
 
     await db.runAsync(
@@ -405,35 +479,43 @@ export async function rateCard(id: number, decision: 'again' | 'hard' | 'good' |
 export async function resetSrsStats(): Promise<void> {
     const db = await getReadyDatabase();
     const now = new Date().toISOString();
+    // Reset due_at to midnight today so all cards are immediately reviewable again.
+    const todayMidnight = getMidnightDue(0);
 
-    await db.runAsync('DELETE FROM review_logs;');
-    await db.runAsync(
-        `UPDATE cards 
-         SET difficulty = 'new',
-             due_at = ?,
-             interval_days = 0,
-             review_count = 0,
-             lapse_count = 0,
-             updated_at = ?;`,
-        [now, now]
-    );
+    await db.withExclusiveTransactionAsync(async () => {
+        await db.runAsync('DELETE FROM review_logs;');
+        await db.runAsync(
+            `UPDATE cards 
+             SET difficulty = 'new',
+                 due_at = ?,
+                 interval_days = 0,
+                 review_count = 0,
+                 lapse_count = 0,
+                 updated_at = ?;`,
+            [todayMidnight, now]
+        );
+    });
 }
 
 export async function resetCardsOnly(): Promise<void> {
     const db = await getReadyDatabase();
 
-    await db.runAsync('DELETE FROM review_logs;');
-    await db.runAsync('DELETE FROM cards;');
+    await db.withExclusiveTransactionAsync(async () => {
+        await db.runAsync('DELETE FROM review_logs;');
+        await db.runAsync('DELETE FROM cards;');
+    });
 }
 
 export async function resetEverything(): Promise<void> {
     const db = await getReadyDatabase();
 
-    await db.runAsync('DELETE FROM review_logs;');
-    await db.runAsync('DELETE FROM cards;');
-    await db.runAsync('DELETE FROM decks;');
-    await db.runAsync('DELETE FROM mistakes;');
-    await db.runAsync('DELETE FROM wins;');
+    await db.withExclusiveTransactionAsync(async () => {
+        await db.runAsync('DELETE FROM review_logs;');
+        await db.runAsync('DELETE FROM cards;');
+        await db.runAsync('DELETE FROM decks;');
+        await db.runAsync('DELETE FROM mistakes;');
+        await db.runAsync('DELETE FROM wins;');
+    });
 }
 
 // --- MISTAKE BANK ENGINE ---
@@ -473,6 +555,18 @@ export async function updateMistakeStatus(id: number, status: 'open' | 'resolved
     );
 }
 
+// updateMistakeContent lets more.tsx edit title/explanation through the
+// database layer instead of calling openDatabase() directly.
+export async function updateMistakeContent(id: number, title: string, explanation: string | null): Promise<void> {
+    const db = await getReadyDatabase();
+    const now = new Date().toISOString();
+
+    await db.runAsync(
+        'UPDATE mistakes SET title = ?, explanation = ?, updated_at = ? WHERE id = ?;',
+        [title, explanation, now, id]
+    );
+}
+
 export async function deleteMistake(id: number): Promise<void> {
     const db = await getReadyDatabase();
 
@@ -502,6 +596,18 @@ export async function deleteWin(id: number): Promise<void> {
     await db.runAsync('DELETE FROM wins WHERE id = ?;', [id]);
 }
 
+// updateWin lets more.tsx edit win text through the database layer instead
+// of calling openDatabase() directly with raw SQL.
+// Note: the wins table has no updated_at column — that is intentional.
+export async function updateWin(id: number, text: string): Promise<void> {
+    const db = await getReadyDatabase();
+
+    await db.runAsync(
+        'UPDATE wins SET text = ? WHERE id = ?;',
+        [text, id]
+    );
+}
+
 // --- STATS ---
 export async function getCardCount(): Promise<number> {
     const db = await getReadyDatabase();
@@ -519,14 +625,15 @@ export async function getTotalReviews(): Promise<number> {
 
 export async function getHomeSummaryStats() {
     const db = await getReadyDatabase();
-    const nowStr = new Date().toISOString();
+    // Use midnight today so the home screen due count matches what getDueCards returns.
+    const todayMidnight = getMidnightDue(0);
 
     const dueResult = await db.getFirstAsync<{ count: number }>(
         `SELECT COUNT(c.id) as count 
          FROM cards c 
          JOIN decks d ON c.deck_id = d.id 
          WHERE (c.due_at IS NULL OR c.due_at <= ?);`,
-        [nowStr]
+        [todayMidnight]
     );
 
     const newResult = await db.getFirstAsync<{ count: number }>(
@@ -545,6 +652,25 @@ export async function getHomeSummaryStats() {
         totalCards,
         totalReviews
     };
+}
+
+// --- DECK DUE BREAKDOWN ---
+// Returns per-deck due counts using the same midnight cutoff as getHomeSummaryStats
+// so the home screen "Due Now" number and the deck breakdown list always agree.
+export async function getDeckDueBreakdown(): Promise<{ id: number; name: string; color: string | null; dueCount: number }[]> {
+    const db = await getReadyDatabase();
+    const todayMidnight = getMidnightDue(0);
+
+    return db.getAllAsync<{ id: number; name: string; color: string | null; dueCount: number }>(
+        `SELECT d.id, d.name, d.color, COUNT(c.id) as dueCount
+         FROM decks d
+         JOIN cards c ON c.deck_id = d.id
+         WHERE (c.due_at IS NULL OR c.due_at <= ?)
+         GROUP BY d.id
+         HAVING COUNT(c.id) > 0
+         ORDER BY dueCount DESC;`,
+        [todayMidnight]
+    );
 }
 
 // --- BACKUP EXPORT ---

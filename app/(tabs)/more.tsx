@@ -8,16 +8,18 @@ import {
   exportDatabaseToBackupObject,
   getAllMistakes,
   getAllWins,
-  openDatabase,
+  getReadyDatabase,
   resetCardsOnly,
   resetEverything,
   resetSrsStats,
-  updateMistakeStatus
+  updateMistakeContent,
+  updateMistakeStatus,
+  updateWin
 } from '@/src/database';
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
+  Clipboard,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -61,6 +63,9 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
   const [editingWinId, setEditingWinId] = useState<number | null>(null);
   const [editWinText, setEditWinText] = useState('');
 
+  // Loading guard — prevents double-taps on export/import/merge/restore buttons
+  const [isBusy, setIsBusy] = useState(false);
+
   const openMistakeCount = mistakes.filter(item => item.status !== 'resolved').length;
   const resolvedMistakeCount = mistakes.filter(item => item.status === 'resolved').length;
   const winCount = wins.length;
@@ -79,11 +84,13 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     }
   }
 
-  useFocusEffect(
-    useCallback(() => {
+  // Consistent with every other screen: reload data when the PagerView makes
+  // this tab visible, and again whenever the user switches sub-tabs (activeTab).
+  useEffect(() => {
+    if (isFocused) {
       loadData();
-    }, [activeTab])
-  );
+    }
+  }, [isFocused, activeTab]);
 
   function resetInlineEditors() {
     setEditingMistakeId(null);
@@ -130,6 +137,46 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
 
   function normalizeImportKey(value: unknown) {
     return String(value ?? '').trim().toLowerCase();
+  }
+
+  const IMPORT_TEMPLATE = JSON.stringify(
+    {
+      decks: [
+        {
+          name: 'Your Deck Name',
+          description: 'Optional description of this deck',
+          color: '#2563EB'
+        }
+      ],
+      cards: [
+        {
+          deck_name: 'Your Deck Name',
+          card_type: 'Q&A',
+          front: 'Question or term here',
+          back: 'Answer or definition here',
+          tags: 'optional, comma, separated',
+          notes: 'Optional extra context'
+        },
+        {
+          deck_name: 'Your Deck Name',
+          card_type: 'Q&A',
+          front: 'Second question here',
+          back: 'Second answer here',
+          tags: null,
+          notes: null
+        }
+      ]
+    },
+    null,
+    2
+  );
+
+  function handleCopyImportTemplate() {
+    Clipboard.setString(IMPORT_TEMPLATE);
+    Alert.alert(
+      'Template Copied ✓',
+      'Paste this into ChatGPT or Claude and say:\n\n"Fill this JSON template with flashcards about [your topic]. Keep the exact structure."'
+    );
   }
 
   function cleanOptionalText(value: unknown): string | null {
@@ -183,10 +230,10 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     }
 
     try {
-      const db = await openDatabase();
-      await db.runAsync(
-        'UPDATE mistakes SET title = ?, explanation = ?, updated_at = ? WHERE id = ?;',
-        [editMistakeTitle.trim(), editMistakeExplanation.trim(), new Date().toISOString(), editingMistakeId]
+      await updateMistakeContent(
+        editingMistakeId,
+        editMistakeTitle.trim(),
+        editMistakeExplanation.trim() || null
       );
 
       setEditingMistakeId(null);
@@ -252,11 +299,7 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     }
 
     try {
-      const db = await openDatabase();
-      await db.runAsync(
-        'UPDATE wins SET text = ? WHERE id = ?;',
-        [editWinText.trim(), editingWinId]
-      );
+      await updateWin(editingWinId, editWinText.trim());
 
       setEditingWinId(null);
       setEditWinText('');
@@ -338,6 +381,8 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
 
   // EXPORT FILE PIPELINE
   async function handleExportBackup() {
+    if (isBusy) return;
+    setIsBusy(true);
     try {
       const backupData = await exportDatabaseToBackupObject();
       const stringifiedPayload = JSON.stringify(backupData, null, 2);
@@ -359,11 +404,13 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     } catch (error) {
       console.error(error);
       Alert.alert('Export Failure', 'Could not create backup file.');
+    } finally {
+      setIsBusy(false);
     }
   }
 
   async function restoreBackupPayload(parsed: BackupPayload) {
-    const db = await openDatabase();
+    const db = await getReadyDatabase();
     const now = new Date().toISOString();
 
     const parsedDecks = normalizeBackupArray(parsed.decks);
@@ -372,147 +419,154 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     const parsedWins = normalizeBackupArray(parsed.wins);
     const parsedReviewLogs = normalizeBackupArray(parsed.reviewLogs);
 
-    // Clear dependent data first, then parent tables.
-    await db.runAsync('DELETE FROM review_logs;');
-    await db.runAsync('DELETE FROM cards;');
-    await db.runAsync('DELETE FROM decks;');
-    await db.runAsync('DELETE FROM mistakes;');
-    await db.runAsync('DELETE FROM wins;');
+    // Everything — all five DELETEs and every INSERT — runs inside a single
+    // exclusive transaction. If any step throws, SQLite rolls back automatically
+    // and the database is left exactly as it was before restore was attempted.
+    // Without this, a crash after the DELETEs would leave the database empty
+    // with no way to recover the user's data.
+    await db.withExclusiveTransactionAsync(async () => {
+      // Clear dependent data first, then parent tables.
+      await db.runAsync('DELETE FROM review_logs;');
+      await db.runAsync('DELETE FROM cards;');
+      await db.runAsync('DELETE FROM decks;');
+      await db.runAsync('DELETE FROM mistakes;');
+      await db.runAsync('DELETE FROM wins;');
 
-    const validDeckIds = new Set<number>();
-    const validCardIds = new Set<number>();
+      const validDeckIds = new Set<number>();
+      const validCardIds = new Set<number>();
 
-    for (const d of parsedDecks) {
-      if (d?.id === undefined || d?.id === null || !d?.name) continue;
+      for (const d of parsedDecks) {
+        if (d?.id === undefined || d?.id === null || !d?.name) continue;
 
-      const deckId = Number(d.id);
-      if (Number.isNaN(deckId)) continue;
+        const deckId = Number(d.id);
+        if (Number.isNaN(deckId)) continue;
 
-      validDeckIds.add(deckId);
+        validDeckIds.add(deckId);
 
-      await db.runAsync(
-        `INSERT OR REPLACE INTO decks 
-         (id, name, description, color, created_at, updated_at) 
-         VALUES (?, ?, ?, ?, ?, ?);`,
-        [
-          deckId,
-          String(d.name),
-          d.description ?? null,
-          d.color ?? '#2563EB',
-          d.created_at || now,
-          d.updated_at || now
-        ]
-      );
-    }
+        await db.runAsync(
+          `INSERT OR REPLACE INTO decks 
+           (id, name, description, color, created_at, updated_at) 
+           VALUES (?, ?, ?, ?, ?, ?);`,
+          [
+            deckId,
+            String(d.name),
+            d.description ?? null,
+            d.color ?? '#2563EB',
+            d.created_at || now,
+            d.updated_at || now
+          ]
+        );
+      }
 
-    for (const c of parsedCards) {
-      if (c?.id === undefined || c?.id === null || c?.deck_id === undefined || c?.deck_id === null) continue;
-      if (!c?.front || !c?.back) continue;
+      for (const c of parsedCards) {
+        if (c?.id === undefined || c?.id === null || c?.deck_id === undefined || c?.deck_id === null) continue;
+        if (!c?.front || !c?.back) continue;
 
-      const cardId = Number(c.id);
-      const deckId = Number(c.deck_id);
+        const cardId = Number(c.id);
+        const deckId = Number(c.deck_id);
 
-      if (Number.isNaN(cardId) || Number.isNaN(deckId)) continue;
-      if (!validDeckIds.has(deckId)) continue;
+        if (Number.isNaN(cardId) || Number.isNaN(deckId)) continue;
+        if (!validDeckIds.has(deckId)) continue;
 
-      validCardIds.add(cardId);
+        validCardIds.add(cardId);
 
-      await db.runAsync(
-        `INSERT OR REPLACE INTO cards 
-         (id, deck_id, card_type, front, back, tags, notes, difficulty, due_at, interval_days, review_count, lapse_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        [
-          cardId,
-          deckId,
-          c.card_type || 'Q&A',
-          String(c.front),
-          String(c.back),
-          c.tags ?? null,
-          c.notes ?? null,
-          c.difficulty || 'new',
-          c.due_at || now,
-          Number(c.interval_days || 0),
-          Number(c.review_count || 0),
-          Number(c.lapse_count || 0),
-          c.created_at || now,
-          c.updated_at || now
-        ]
-      );
-    }
+        await db.runAsync(
+          `INSERT OR REPLACE INTO cards 
+           (id, deck_id, card_type, front, back, tags, notes, difficulty, due_at, interval_days, review_count, lapse_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [
+            cardId,
+            deckId,
+            c.card_type || 'Q&A',
+            String(c.front),
+            String(c.back),
+            c.tags ?? null,
+            c.notes ?? null,
+            c.difficulty || 'new',
+            c.due_at || now,
+            Number(c.interval_days || 0),
+            Number(c.review_count || 0),
+            Number(c.lapse_count || 0),
+            c.created_at || now,
+            c.updated_at || now
+          ]
+        );
+      }
 
-    for (const m of parsedMistakes) {
-      if (m?.id === undefined || m?.id === null || !m?.title) continue;
+      for (const m of parsedMistakes) {
+        if (m?.id === undefined || m?.id === null || !m?.title) continue;
 
-      const mistakeId = Number(m.id);
-      if (Number.isNaN(mistakeId)) continue;
+        const mistakeId = Number(m.id);
+        if (Number.isNaN(mistakeId)) continue;
 
-      const relatedCardId =
-        m.related_card_id !== undefined &&
-        m.related_card_id !== null &&
-        validCardIds.has(Number(m.related_card_id))
-          ? Number(m.related_card_id)
-          : null;
+        const relatedCardId =
+          m.related_card_id !== undefined &&
+          m.related_card_id !== null &&
+          validCardIds.has(Number(m.related_card_id))
+            ? Number(m.related_card_id)
+            : null;
 
-      await db.runAsync(
-        `INSERT OR REPLACE INTO mistakes 
-         (id, title, explanation, related_card_id, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?);`,
-        [
-          mistakeId,
-          String(m.title),
-          m.explanation ?? null,
-          relatedCardId,
-          m.status === 'resolved' ? 'resolved' : 'open',
-          m.created_at || now,
-          m.updated_at || now
-        ]
-      );
-    }
+        await db.runAsync(
+          `INSERT OR REPLACE INTO mistakes 
+           (id, title, explanation, related_card_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?);`,
+          [
+            mistakeId,
+            String(m.title),
+            m.explanation ?? null,
+            relatedCardId,
+            m.status === 'resolved' ? 'resolved' : 'open',
+            m.created_at || now,
+            m.updated_at || now
+          ]
+        );
+      }
 
-    for (const w of parsedWins) {
-      if (w?.id === undefined || w?.id === null || !w?.text) continue;
+      for (const w of parsedWins) {
+        if (w?.id === undefined || w?.id === null || !w?.text) continue;
 
-      const winId = Number(w.id);
-      if (Number.isNaN(winId)) continue;
+        const winId = Number(w.id);
+        if (Number.isNaN(winId)) continue;
 
-      await db.runAsync(
-        `INSERT OR REPLACE INTO wins 
-         (id, text, created_at)
-         VALUES (?, ?, ?);`,
-        [
-          winId,
-          String(w.text),
-          w.created_at || now
-        ]
-      );
-    }
+        await db.runAsync(
+          `INSERT OR REPLACE INTO wins 
+           (id, text, created_at)
+           VALUES (?, ?, ?);`,
+          [
+            winId,
+            String(w.text),
+            w.created_at || now
+          ]
+        );
+      }
 
-    for (const log of parsedReviewLogs) {
-      if (log?.id === undefined || log?.id === null || log?.card_id === undefined || log?.card_id === null) continue;
+      for (const log of parsedReviewLogs) {
+        if (log?.id === undefined || log?.id === null || log?.card_id === undefined || log?.card_id === null) continue;
 
-      const logId = Number(log.id);
-      const cardId = Number(log.card_id);
+        const logId = Number(log.id);
+        const cardId = Number(log.card_id);
 
-      if (Number.isNaN(logId) || Number.isNaN(cardId)) continue;
-      if (!validCardIds.has(cardId)) continue;
+        if (Number.isNaN(logId) || Number.isNaN(cardId)) continue;
+        if (!validCardIds.has(cardId)) continue;
 
-      await db.runAsync(
-        `INSERT OR REPLACE INTO review_logs 
-         (id, card_id, mode, rating, created_at) 
-         VALUES (?, ?, ?, ?, ?);`,
-        [
-          logId,
-          cardId,
-          log.mode === 're-view' ? 're-view' : 'srs',
-          log.rating || null,
-          log.created_at || now
-        ]
-      );
-    }
+        await db.runAsync(
+          `INSERT OR REPLACE INTO review_logs 
+           (id, card_id, mode, rating, created_at) 
+           VALUES (?, ?, ?, ?, ?);`,
+          [
+            logId,
+            cardId,
+            log.mode === 're-view' ? 're-view' : 'srs',
+            log.rating || null,
+            log.created_at || now
+          ]
+        );
+      }
+    });
   }
 
   async function mergeDecksAndCardsPayload(parsed: BackupPayload) {
-    const db = await openDatabase();
+    const db = await getReadyDatabase();
     const now = new Date().toISOString();
 
     const parsedDecks = normalizeBackupArray(parsed.decks);
@@ -598,11 +652,6 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
       return targetDeckId;
     }
 
-    // First pass: prepare imported decks and map old backup deck IDs to local deck IDs.
-    for (const d of parsedDecks) {
-      await getOrCreateDeckFromImport(d);
-    }
-
     async function getTargetDeckIdForCard(card: any) {
       if (card?.deck_id !== undefined && card?.deck_id !== null) {
         const importedDeckId = Number(card.deck_id);
@@ -647,65 +696,77 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
       return null;
     }
 
-    // Second pass: add cards without overwriting existing cards.
-    for (const c of parsedCards) {
-      const front = cleanOptionalText(c?.front);
-      const back = cleanOptionalText(c?.back);
-
-      if (!front || !back) {
-        stats.skippedCards += 1;
-        continue;
+    // Both passes wrapped in a single transaction.
+    // This makes the import atomic (all-or-nothing) and dramatically speeds up
+    // large imports since SQLite batches writes instead of auto-committing each one.
+    await db.withExclusiveTransactionAsync(async () => {
+      // First pass: prepare imported decks and map old backup deck IDs to local deck IDs.
+      for (const d of parsedDecks) {
+        await getOrCreateDeckFromImport(d);
       }
 
-      const targetDeckId = await getTargetDeckIdForCard(c);
+      // Second pass: add cards without overwriting existing cards.
+      for (const c of parsedCards) {
+        const front = cleanOptionalText(c?.front);
+        const back = cleanOptionalText(c?.back);
 
-      if (!targetDeckId) {
-        stats.skippedCards += 1;
-        continue;
+        if (!front || !back) {
+          stats.skippedCards += 1;
+          continue;
+        }
+
+        const targetDeckId = await getTargetDeckIdForCard(c);
+
+        if (!targetDeckId) {
+          stats.skippedCards += 1;
+          continue;
+        }
+
+        const duplicateCard = await db.getFirstAsync<any>(
+          `SELECT id FROM cards
+           WHERE deck_id = ?
+           AND LOWER(TRIM(front)) = ?
+           AND LOWER(TRIM(back)) = ?
+           LIMIT 1;`,
+          [targetDeckId, front.toLowerCase(), back.toLowerCase()]
+        );
+
+        if (duplicateCard?.id) {
+          stats.skippedCards += 1;
+          continue;
+        }
+
+        await db.runAsync(
+          `INSERT INTO cards
+           (deck_id, card_type, front, back, tags, notes, difficulty, due_at, interval_days, review_count, lapse_count, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [
+            targetDeckId,
+            c?.card_type || c?.type || 'Q&A',
+            front,
+            back,
+            cleanOptionalText(c?.tags),
+            cleanOptionalText(c?.notes),
+            c?.difficulty || 'new',
+            c?.due_at || now,
+            Number(c?.interval_days || 0),
+            Number(c?.review_count || 0),
+            Number(c?.lapse_count || 0),
+            c?.created_at || now,
+            c?.updated_at || now
+          ]
+        );
+
+        stats.importedCards += 1;
       }
-
-      const duplicateCard = await db.getFirstAsync<any>(
-        `SELECT id FROM cards
-         WHERE deck_id = ?
-         AND LOWER(TRIM(front)) = ?
-         AND LOWER(TRIM(back)) = ?
-         LIMIT 1;`,
-        [targetDeckId, front.toLowerCase(), back.toLowerCase()]
-      );
-
-      if (duplicateCard?.id) {
-        stats.skippedCards += 1;
-        continue;
-      }
-
-      await db.runAsync(
-        `INSERT INTO cards
-         (deck_id, card_type, front, back, tags, notes, difficulty, due_at, interval_days, review_count, lapse_count, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        [
-          targetDeckId,
-          c?.card_type || c?.type || 'Q&A',
-          front,
-          back,
-          cleanOptionalText(c?.tags),
-          cleanOptionalText(c?.notes),
-          c?.difficulty || 'new',
-          c?.due_at || now,
-          Number(c?.interval_days || 0),
-          Number(c?.review_count || 0),
-          Number(c?.lapse_count || 0),
-          c?.created_at || now,
-          c?.updated_at || now
-        ]
-      );
-
-      stats.importedCards += 1;
-    }
+    });
 
     return stats;
   }
 
   async function handleMergeDecksAndCardsFile() {
+    if (isBusy) return;
+    setIsBusy(true);
     try {
       const selection = await DocumentPicker.getDocumentAsync({
         type: ['application/json', 'text/plain', '*/*'],
@@ -759,10 +820,14 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     } catch (e) {
       console.error(e);
       Alert.alert('Merge Import Error', 'Failed to merge selected decks/cards file.');
+    } finally {
+      setIsBusy(false);
     }
   }
 
   async function handleImportBackupFile() {
+    if (isBusy) return;
+    setIsBusy(true);
     try {
       const selection = await DocumentPicker.getDocumentAsync({
         type: ['application/json', 'text/plain', '*/*'],
@@ -813,6 +878,8 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
     } catch (e) {
       console.error(e);
       Alert.alert('Restore Error', 'Failed to restore selected backup file.');
+    } finally {
+      setIsBusy(false);
     }
   }
 
@@ -1084,8 +1151,14 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
                 Create a JSON backup containing decks, cards, review logs, mistakes, and wins. Save this somewhere safe.
               </Text>
 
-              <TouchableOpacity style={[styles.actionButton, styles.backupExportButton]} onPress={handleExportBackup}>
-                <Text style={styles.actionButtonText}>📤 Export Full Backup (.json)</Text>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.backupExportButton, isBusy && styles.busyButton]}
+                onPress={handleExportBackup}
+                disabled={isBusy}
+              >
+                <Text style={styles.actionButtonText}>
+                  {isBusy ? '⏳ Exporting...' : '📤 Export Full Backup (.json)'}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -1095,8 +1168,22 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
                 Add AI-generated decks/cards or deck packs without deleting current data. Existing decks with the same name are reused. Duplicate cards are skipped.
               </Text>
 
-              <TouchableOpacity style={[styles.actionButton, styles.mergeImportButton]} onPress={handleMergeDecksAndCardsFile}>
-                <Text style={styles.actionButtonText}>📚 Merge Import Decks/Cards</Text>
+              <TouchableOpacity style={[styles.actionButton, styles.templateButton]} onPress={handleCopyImportTemplate}>
+                <Text style={styles.actionButtonText}>📋 Copy Import Template</Text>
+              </TouchableOpacity>
+
+              <Text style={styles.templateHint}>
+                Paste into ChatGPT or Claude → "Fill this with flashcards about [topic]" → save as .json → import below
+              </Text>
+
+              <TouchableOpacity
+                style={[styles.actionButton, styles.mergeImportButton, isBusy && styles.busyButton]}
+                onPress={handleMergeDecksAndCardsFile}
+                disabled={isBusy}
+              >
+                <Text style={styles.actionButtonText}>
+                  {isBusy ? '⏳ Importing...' : '📚 Merge Import Decks/Cards'}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -1112,8 +1199,14 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
                 </Text>
               </View>
 
-              <TouchableOpacity style={[styles.actionButton, styles.restoreDangerButton]} onPress={handleImportBackupFile}>
-                <Text style={styles.actionButtonText}>⚠️ Restore Backup File</Text>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.restoreDangerButton, isBusy && styles.busyButton]}
+                onPress={handleImportBackupFile}
+                disabled={isBusy}
+              >
+                <Text style={styles.actionButtonText}>
+                  {isBusy ? '⏳ Restoring...' : '⚠️ Restore Backup File'}
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -1247,7 +1340,10 @@ const styles = StyleSheet.create({
   resetOptionBtn: { backgroundColor: '#1F2937', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#4B5563', marginBottom: 10, alignItems: 'center' },
   resetOptionText: { color: '#FCA5A5', fontWeight: '600', fontSize: 14 },
   fullResetBtn: { backgroundColor: '#7F1D1D' },
-  fullResetText: { color: '#FFFFFF' }
+  fullResetText: { color: '#FFFFFF' },
+  busyButton: { opacity: 0.5 },
+  templateButton: { backgroundColor: '#1D4ED8', marginBottom: 10 },
+  templateHint: { color: '#6B7280', fontSize: 11, lineHeight: 16, textAlign: 'center', marginBottom: 14, fontStyle: 'italic' }
 });
 
 

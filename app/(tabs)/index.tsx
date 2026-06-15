@@ -1,4 +1,4 @@
-import { getAllCards, getAllDecks, getAllWins, getHomeSummaryStats } from '@/src/database';
+import { getAllDecks, getAllWins, getDeckDueBreakdown, getHomeSummaryStats } from '@/src/database';
 import { useEffect, useState } from 'react';
 import { DeviceEventEmitter, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -44,7 +44,11 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
       const currentStats = await getHomeSummaryStats();
       const historicWins = await getAllWins();
       const loadedDecks = await getAllDecks();
-      const loadedCards = await getAllCards();
+      // Use the DB-layer breakdown so the per-deck counts use the same
+      // midnight cutoff as getHomeSummaryStats — fixes Bug #2 where the
+      // JS-side loop used new Date().toISOString() (current moment) while
+      // the summary stat used midnight, causing the numbers to diverge.
+      const breakdown = await getDeckDueBreakdown();
 
       setStats({ ...currentStats, totalDecks: loadedDecks.length });
 
@@ -54,30 +58,12 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
         setLatestWin(null);
       }
 
-      const nowStr = new Date().toISOString();
-      const countsMap: { [key: number]: number } = {};
-
-      loadedDecks.forEach(deck => {
-        countsMap[deck.id] = 0;
-      });
-
-      loadedCards.forEach(card => {
-        const isDue = !card.due_at || card.due_at <= nowStr;
-
-        if (isDue && countsMap[card.deck_id] !== undefined) {
-          countsMap[card.deck_id]++;
-        }
-      });
-
-      const breakdownData: DeckStats[] = loadedDecks
-        .filter(deck => (countsMap[deck.id] || 0) > 0)
-        .map(deck => ({
-          id: deck.id,
-          name: deck.name,
-          color: deck.color || '#374151',
-          count: countsMap[deck.id] || 0
-        }))
-        .sort((a, b) => b.count - a.count);
+      const breakdownData: DeckStats[] = breakdown.map(row => ({
+        id: row.id,
+        name: row.name,
+        color: row.color || '#374151',
+        count: row.dueCount
+      }));
 
       setDeckBreakdown(breakdownData);
 

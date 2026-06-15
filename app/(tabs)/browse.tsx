@@ -1,5 +1,5 @@
-import { DbCard, DbDeck, getAllCards, getAllDecks, openDatabase, updateCard } from '@/src/database';
-import { useEffect, useMemo, useState } from 'react';
+import { DbCard, DbDeck, deleteCard, deleteDeck, getAllCards, getAllDecks, getReadyDatabase, updateCard, updateDeckFull } from '@/src/database';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -58,7 +58,7 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
 
   const isSearching = searchText.trim().length > 0;
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     try {
       const savedCards = await getAllCards();
       const savedDecks = await getAllDecks();
@@ -66,21 +66,24 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
       setCards(savedCards);
       setDecks(savedDecks);
 
-      if (selectedDeckId !== null && !savedDecks.some(d => d.id === selectedDeckId)) {
-        setSelectedDeckId(null);
-        resetBatchSelection();
-      }
+      setSelectedDeckId(prev => {
+        if (prev !== null && !savedDecks.some(d => d.id === prev)) {
+          resetBatchSelection();
+          return null;
+        }
+        return prev;
+      });
     } catch (e) {
       console.error('Error loading Browse data:', e);
       Alert.alert('Load Error', 'Could not load cards and decks.');
     }
-  }
+  }, []);
 
   useEffect(() => {
     if (isFocused) {
       loadData();
     }
-  }, [isFocused]);
+  }, [isFocused, loadData]);
 
   function resetBatchSelection() {
     setIsBatchMode(false);
@@ -213,10 +216,11 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
     }
 
     try {
-      const db = await openDatabase();
-      await db.runAsync(
-        'UPDATE decks SET name = ?, description = ?, color = ?, updated_at = ? WHERE id = ?;',
-        [deckFormName.trim(), deckFormDesc.trim(), deckFormColor, new Date().toISOString(), selectedDeckId]
+      await updateDeckFull(
+        selectedDeckId,
+        deckFormName.trim(),
+        deckFormDesc.trim() || null,
+        deckFormColor
       );
 
       setIsEditingDeck(false);
@@ -243,17 +247,11 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
   async function deleteCardsByIds(ids: number[]) {
     if (ids.length === 0) return;
 
-    const db = await openDatabase();
-    const placeholders = buildPlaceholders(ids);
-    const now = new Date().toISOString();
-
-    // Clean dependent records first. This keeps stats correct even if SQLite cascade behavior changes.
-    await db.runAsync(`DELETE FROM review_logs WHERE card_id IN (${placeholders});`, ids);
-    await db.runAsync(
-      `UPDATE mistakes SET related_card_id = NULL, updated_at = ? WHERE related_card_id IN (${placeholders});`,
-      [now, ...ids]
-    );
-    await db.runAsync(`DELETE FROM cards WHERE id IN (${placeholders});`, ids);
+    // Each deleteCard call is wrapped in its own transaction in the database layer,
+    // ensuring review_logs and mistake references are cleaned up atomically per card.
+    for (const id of ids) {
+      await deleteCard(id);
+    }
   }
 
   async function handleBatchDelete() {
@@ -291,7 +289,7 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
     if (ids.length === 0) return;
 
     try {
-      const db = await openDatabase();
+      const db = await getReadyDatabase();
       const placeholders = buildPlaceholders(ids);
 
       await db.runAsync(
@@ -386,19 +384,9 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
           style: 'destructive',
           onPress: async () => {
             try {
-              const db = await openDatabase();
-              const now = new Date().toISOString();
-
-              await db.runAsync(
-                'DELETE FROM review_logs WHERE card_id IN (SELECT id FROM cards WHERE deck_id = ?);',
-                [deckId]
-              );
-              await db.runAsync(
-                'UPDATE mistakes SET related_card_id = NULL, updated_at = ? WHERE related_card_id IN (SELECT id FROM cards WHERE deck_id = ?);',
-                [now, deckId]
-              );
-              await db.runAsync('DELETE FROM cards WHERE deck_id = ?;', [deckId]);
-              await db.runAsync('DELETE FROM decks WHERE id = ?;', [deckId]);
+              // deleteDeck() in the database layer wraps all deletes in a single
+              // transaction, preventing orphaned cards or review_logs on crash.
+              await deleteDeck(deckId);
 
               setSelectedDeckId(null);
               resetBatchSelection();
