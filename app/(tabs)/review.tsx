@@ -12,7 +12,7 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-
+import { SafeAreaView } from 'react-native-safe-area-context';
 export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     const [decks, setDecks] = useState<DbDeck[]>([]);
     const [selectedDeckIdFilter, setSelectedDeckIdFilter] = useState<string>('All');
@@ -219,7 +219,7 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
     });
 
     return (
-        <View style={styles.screenWrapper}>
+        <SafeAreaView edges={['top']} style={styles.screenWrapper}>
             {/* Header Controls */}
             <View style={styles.headerControlSection}>
                 <Text style={[styles.screenTitle, isReViewMode && styles.screenTitleReView]}>
@@ -520,7 +520,7 @@ export default function ReviewScreen({ isFocused }: { isFocused?: boolean }) {
                     )}
                 </View>
             )}
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -529,7 +529,6 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#111827',
         paddingHorizontal: 16,
-        paddingTop: 54,
         paddingBottom: 16
     },
     centeringWrapper: {

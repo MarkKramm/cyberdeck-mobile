@@ -31,6 +31,7 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -884,6 +885,7 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
   }
 
   return (
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: '#111827' }}>
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1232,11 +1234,12 @@ export default function MoreScreen({ isFocused }: { isFocused?: boolean }) {
         )}
       </ScrollView>
     </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827', paddingHorizontal: 24, paddingTop: 54 },
+  container: { flex: 1, backgroundColor: '#111827', paddingHorizontal: 24 },
   headerTitle: { fontSize: 32, fontWeight: 'bold', color: '#FFFFFF', textAlign: 'center', marginBottom: 20 },
   tabBarRow: { flexDirection: 'row', backgroundColor: '#1F2937', padding: 6, borderRadius: 14, marginBottom: 20, borderWidth: 1, borderColor: '#374151' },
   tabButton: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: 'transparent' },

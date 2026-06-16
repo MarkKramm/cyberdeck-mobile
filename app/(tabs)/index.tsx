@@ -1,6 +1,7 @@
 import { getAllDecks, getAllWins, getDeckDueBreakdown, getHomeSummaryStats } from '@/src/database';
 import { useEffect, useState } from 'react';
 import { DeviceEventEmitter, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const WISDOM_QUOTES = [
   'One card today still counts.',
@@ -109,7 +110,7 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
   const shouldCenterContent = deckBreakdown.length <= 3;
 
   return (
-    <View style={styles.screenContainer}>
+    <SafeAreaView edges={['top']} style={styles.screenContainer}>
       <View style={styles.topCenteredHeaderSection}>
         <Text style={styles.title}>CYBERDECK</Text>
 
@@ -214,7 +215,7 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
           <Text style={styles.footerInlineStatsText}>Reviews: {stats.totalReviews}</Text>
         </View>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -223,7 +224,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#111827',
     paddingHorizontal: 24,
-    paddingTop: 64,
     paddingBottom: 16
   },
   topCenteredHeaderSection: {

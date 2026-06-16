@@ -14,6 +14,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const CARD_TYPES = [
   'Q&A',
@@ -462,7 +463,7 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView edges={['top']} style={styles.container}>
       <View style={styles.contentBox}>
         <Text
           style={
@@ -677,7 +678,7 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
       </Modal>
 
       <Modal visible={editingCard !== null} transparent animationType="slide" onRequestClose={() => setEditingCard(null)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <ScrollView style={styles.modalScrollBox} keyboardShouldPersistTaps="always" showsVerticalScrollIndicator={false}>
             <View style={styles.modalBox}>
               <Text style={styles.modalTitle}>Edit Card</Text>
@@ -784,12 +785,12 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111827', paddingHorizontal: 24, paddingTop: 40 },
+  container: { flex: 1, backgroundColor: '#111827', paddingHorizontal: 24 },
   contentBox: { width: '100%', height: '100%' },
   title: { fontSize: 24, fontWeight: 'bold', color: 'white', textAlign: 'center', marginBottom: 12 },
   vaultTitle: { fontSize: 37, fontWeight: '300', color: 'white', textAlign: 'center', marginBottom: 18, letterSpacing: 4 },

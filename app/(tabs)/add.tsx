@@ -13,6 +13,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type DeckOption = {
     id: number;
@@ -243,9 +244,10 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                         : 'Save Card';
 
     return (
+        <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: '#111827' }}>
         <KeyboardAvoidingView
             style={styles.screen}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
         >
             <ScrollView
@@ -520,13 +522,14 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
                 </TouchableOpacity>
             </View>
         </KeyboardAvoidingView>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     screen: { flex: 1, backgroundColor: '#111827' },
     scrollRoot: { flex: 1, backgroundColor: '#111827' },
-    container: { padding: 24, paddingTop: 48, paddingBottom: 160 },
+    container: { padding: 24, paddingBottom: 160 },
     formBox: { width: '100%' },
     title: {
         fontSize: 42,
@@ -633,14 +636,6 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: '#374151',
         padding: 16
-    },
-    modalTitle: {
-        color: '#9CA3AF',
-        fontSize: 12,
-        fontWeight: '900',
-        letterSpacing: 1,
-        marginBottom: 14,
-        textAlign: 'center'
     },
     modalOption: {
         backgroundColor: '#111827',
@@ -861,10 +856,10 @@ const styles = StyleSheet.create({
         borderColor: '#374151'
     },
     modalTitle: {
-        color: '#FFFFFF',
+        color: '#ffffff',
         fontSize: 24,
-        fontWeight: '900',
-        marginBottom: 6,
+        fontWeight: '700',
+        marginBottom: 10,
         textAlign: 'center'
     },
     modalSubtitle: {
