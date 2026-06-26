@@ -1,4 +1,4 @@
-import { getAllDecks, getAllWins, getDeckDueBreakdown, getHomeSummaryStats } from '@/src/database';
+import { getAllDecks, getAllWins, getDeckDueBreakdown, getHomeSummaryStats, getStreak } from '@/src/database';
 import { useEffect, useState } from 'react';
 import { DeviceEventEmitter, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -39,19 +39,18 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
   const [latestWin, setLatestWin] = useState<string | null>(null);
   const [quote, setQuote] = useState('');
   const [deckBreakdown, setDeckBreakdown] = useState<DeckStats[]>([]);
+  const [streak, setStreak] = useState(0);
 
   async function loadDashboardData() {
     try {
       const currentStats = await getHomeSummaryStats();
       const historicWins = await getAllWins();
       const loadedDecks = await getAllDecks();
-      // Use the DB-layer breakdown so the per-deck counts use the same
-      // midnight cutoff as getHomeSummaryStats — fixes Bug #2 where the
-      // JS-side loop used new Date().toISOString() (current moment) while
-      // the summary stat used midnight, causing the numbers to diverge.
       const breakdown = await getDeckDueBreakdown();
+      const currentStreak = await getStreak();
 
       setStats({ ...currentStats, totalDecks: loadedDecks.length });
+      setStreak(currentStreak);
 
       if (historicWins && historicWins.length > 0) {
         setLatestWin(historicWins[0].text);
@@ -109,10 +108,19 @@ export default function HomeScreen({ isFocused }: { isFocused?: boolean }) {
 
   const shouldCenterContent = deckBreakdown.length <= 3;
 
+  const streakBorderColor = streak > 0 ? '#F59E0B' : '#374151';
+  const streakTextColor = streak > 0 ? '#FBBF24' : '#6B7280';
+
   return (
     <SafeAreaView edges={['top']} style={styles.screenContainer}>
       <View style={styles.topCenteredHeaderSection}>
-        <Text style={styles.title}>CYBERDECK</Text>
+        {/* Title row with streak badge — left + right layout */}
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>CYBERDECK</Text>
+          <View style={[styles.streakBadge, { borderColor: streakBorderColor }]}>
+            <Text style={[styles.streakText, { color: streakTextColor }]}>🔥 {streak}</Text>
+          </View>
+        </View>
 
         <View style={[styles.statusPanel, { borderColor: statusColor }]}>
           <View style={styles.statusHeaderRow}>
@@ -230,13 +238,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 12,
+  },
   title: {
     fontSize: 42,
     fontWeight: '300',
     color: '#FFFFFF',
-    marginBottom: 12,
-    textAlign: 'center',
-    letterSpacing: 4
+    letterSpacing: 4,
+  },
+  streakBadge: {
+    backgroundColor: '#1F2937',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#374151',
+    marginLeft: 12,
+  },
+  streakText: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    color: '#6B7280',
   },
   statusPanel: {
     width: '100%',

@@ -413,7 +413,6 @@ const conditions: string[] = ['c.suspended = 0'];
 
     // If Re-View is false, strictly apply spaced repetition due-date constraints.
 if (!isReViewMode) {
-    conditions.push('c.suspended = 0');
         // DATE() cast on both sides makes this comparison format-safe.
         // getMidnightDue always produces ISO 8601 (YYYY-MM-DDTHH:MM:SS.sssZ), and
         // SQLite string comparison works correctly for that format. The DATE() cast
@@ -589,6 +588,16 @@ export async function updateStreak(): Promise<void> {
         [String(currentStreak)]
     );
 }
+
+// --- STREAK TRACKING ---
+export async function getStreak(): Promise<number> {
+    const db = await getReadyDatabase();
+    const row = await db.getFirstAsync<{ value: string }>(
+        "SELECT value FROM user_meta WHERE key = 'current_streak';"
+    );
+    return Number(row?.value ?? 0);
+}
+
 
 // --- SESSION REFLECTION JOURNAL ---
 export async function saveSessionJournal(
