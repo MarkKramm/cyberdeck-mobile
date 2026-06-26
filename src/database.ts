@@ -23,6 +23,7 @@ export type DbCard = {
     interval_days: number;
     review_count: number;
     lapse_count: number;
+    ease_factor?: number;
     created_at: string;
     updated_at: string;
     deck_name?: string;
@@ -49,6 +50,20 @@ export type DbReviewLog = {
     card_id: number;
     mode: 'srs' | 're-view';
     rating?: string | null;
+    created_at: string;
+};
+
+export type DbUserMeta = {
+    key: string;
+    value: string;
+};
+
+export type DbSessionJournal = {
+    id: number;
+    session_date: string;
+    cards_reviewed: number;
+    accuracy: number;
+    reflection_text: string;
     created_at: string;
 };
 
@@ -110,6 +125,8 @@ export function initializeDatabase(): Promise<void> {
                 interval_days INTEGER DEFAULT 0,
                 review_count INTEGER DEFAULT 0,
                 lapse_count INTEGER DEFAULT 0,
+                ease_factor REAL DEFAULT 2.5,
+                suspended INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
@@ -163,7 +180,34 @@ export function initializeDatabase(): Promise<void> {
             `INSERT OR IGNORE INTO app_metadata (key, value) VALUES ('schema_version', '1');`
         );
 
-        // 7. Performance indexes.
+        // 8. User meta table (streak tracking)
+        await db.execAsync(`
+            CREATE TABLE IF NOT EXISTS user_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+        `);
+
+        await db.runAsync(
+            `INSERT OR IGNORE INTO user_meta (key, value) VALUES ('last_review_date', '');`
+        );
+        await db.runAsync(
+            `INSERT OR IGNORE INTO user_meta (key, value) VALUES ('current_streak', '0');`
+        );
+
+        // 9. Session journal table
+        await db.execAsync(`
+            CREATE TABLE IF NOT EXISTS session_journal (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_date TEXT,
+                cards_reviewed INTEGER,
+                accuracy REAL,
+                reflection_text TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        // 10. Performance indexes.
         // IF NOT EXISTS makes these safe to run on every cold start.
         await db.execAsync(`
             CREATE INDEX IF NOT EXISTS idx_cards_due_at        ON cards(due_at);
@@ -172,6 +216,20 @@ export function initializeDatabase(): Promise<void> {
             CREATE INDEX IF NOT EXISTS idx_review_logs_card_id ON review_logs(card_id);
             CREATE INDEX IF NOT EXISTS idx_mistakes_card_id    ON mistakes(related_card_id);
         `);
+
+        // --- MIGRATIONS ---
+        // Always use try/catch for ALTER TABLE to handle cases where columns already exist
+        // without crashing the app for existing users.
+        try {
+            await db.execAsync(`ALTER TABLE cards ADD COLUMN ease_factor REAL DEFAULT 2.5;`);
+        } catch (e) {
+            console.log("Migration: ease_factor column already exists or other error", e);
+        }
+        try {
+            await db.execAsync(`ALTER TABLE cards ADD COLUMN suspended INTEGER DEFAULT 0;`);
+        } catch (e) {
+            console.log("Migration: suspended column already exists or other error", e);
+        }
 
         // --- SEED SELECTION SAFEGUARD ---
         const deckCheck = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM decks;');
@@ -350,11 +408,12 @@ export async function getDueCards(
         JOIN decks d ON c.deck_id = d.id
     `;
 
-    const conditions: string[] = [];
+const conditions: string[] = ['c.suspended = 0'];
     const params: any[] = [];
 
     // If Re-View is false, strictly apply spaced repetition due-date constraints.
-    if (!isReViewMode) {
+if (!isReViewMode) {
+    conditions.push('c.suspended = 0');
         // DATE() cast on both sides makes this comparison format-safe.
         // getMidnightDue always produces ISO 8601 (YYYY-MM-DDTHH:MM:SS.sssZ), and
         // SQLite string comparison works correctly for that format. The DATE() cast
@@ -427,35 +486,43 @@ export async function rateCard(id: number, decision: 'again' | 'hard' | 'good' |
     if (!card) return;
 
     const newDifficulty = decision;
-    const shouldIncrementLapse = decision === 'again';
+     const shouldIncrementLapse = decision === 'again';
+     const newLapseCount = shouldIncrementLapse ? card.lapse_count + 1 : card.lapse_count;
+     const newSuspendedStatus = newLapseCount >= 5 ? 1 : 0;
 
-    let nextInterval: number;  // saved to interval_days (the springboard)
-    let daysUntilDue: number;  // passed to getMidnightDue (when you actually see it)
+     let currentEaseFactor = card.ease_factor ?? 2.5; // Handle null ease_factor with default
+     let nextInterval: number; // saved to interval_days (the springboard)
+     let daysUntilDue: number; // passed to getMidnightDue (when you actually see it)
 
-    if (decision === 'again') {
+     if (decision === 'again') {
+        // Decrease ease_factor by 0.20, cap between 1.3 and 3.0
+        currentEaseFactor = Math.max(1.3, currentEaseFactor - 0.20);
+
         if (card.interval_days > 4) {
-            // Lapse penalty: preserve 20% of the old interval as the springboard so
-            // the next Good rating multiplies from there instead of restarting at 3.
-            // But force it due TOMORROW so a forgotten card is never buried for days.
             nextInterval = Math.max(1, Math.round(card.interval_days * 0.2));
             daysUntilDue = 1;
         } else {
-            // Young card — just reset both.
             nextInterval = 1;
             daysUntilDue = 1;
         }
     } else if (decision === 'hard') {
+        // ease_factor stays the same
         nextInterval = card.interval_days === 0 ? 1 : Math.max(card.interval_days + 1, Math.round(card.interval_days * 1.2));
         daysUntilDue = nextInterval;
     } else if (decision === 'good') {
-        // Use the stored interval_days as the springboard — this is what makes
-        // a lapsed card recover to 15 days (6 * 2.5) instead of restarting at 3.
-        nextInterval = card.interval_days === 0 ? 3 : Math.max(1, Math.round(card.interval_days * 2.5));
+        // ease_factor stays the same
+        nextInterval = card.interval_days === 0 ? 3 : Math.max(1, Math.round(card.interval_days * currentEaseFactor));
         daysUntilDue = nextInterval;
     } else { // easy
-        nextInterval = card.interval_days === 0 ? 7 : Math.max(1, Math.round(card.interval_days * 4.0));
+        // Increase ease_factor by 0.15, cap between 1.3 and 3.0
+        currentEaseFactor = Math.min(3.0, currentEaseFactor + 0.15);
+        nextInterval = card.interval_days === 0 ? 7 : Math.max(1, Math.round(card.interval_days * currentEaseFactor));
         daysUntilDue = nextInterval;
     }
+
+    // Cap daysUntilDue and nextInterval at 365 days max
+    daysUntilDue = Math.min(365, daysUntilDue);
+    nextInterval = Math.min(365, nextInterval);
 
     const nextDueStr = getMidnightDue(daysUntilDue);
     const tsStr = new Date().toISOString();
@@ -466,13 +533,77 @@ export async function rateCard(id: number, decision: 'again' | 'hard' | 'good' |
              due_at = ?, 
              interval_days = ?, 
              review_count = review_count + 1,
-             lapse_count = lapse_count + ?,
+             lapse_count = ?,
+             ease_factor = ?,
+             suspended = ?,
              updated_at = ? 
          WHERE id = ?;`,
-        [newDifficulty, nextDueStr, nextInterval, shouldIncrementLapse ? 1 : 0, tsStr, id]
+        [newDifficulty, nextDueStr, nextInterval, newLapseCount, currentEaseFactor, newSuspendedStatus, tsStr, id]
     );
 
     await logReviewHistory(id, 'srs', decision);
+
+    await updateStreak();
+}
+
+// --- STREAK TRACKING ---
+export async function updateStreak(): Promise<void> {
+    const db = await getReadyDatabase();
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+
+    const lastDateRow = await db.getFirstAsync<DbUserMeta>(
+        "SELECT value FROM user_meta WHERE key = 'last_review_date';"
+    );
+    const currentStreakRow = await db.getFirstAsync<DbUserMeta>(
+        "SELECT value FROM user_meta WHERE key = 'current_streak';"
+    );
+
+    const lastReviewDate = lastDateRow?.value ?? '';
+    let currentStreak = Number(currentStreakRow?.value ?? 0);
+
+    // If same day, do nothing
+    if (lastReviewDate === todayStr) return;
+
+    // Calculate yesterday's date
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    if (lastReviewDate === yesterdayStr) {
+        // Consecutive day → increment streak
+        currentStreak += 1;
+    } else {
+        // Gap > 1 day (or first ever review) → reset streak
+        currentStreak = 0;
+    }
+
+    await db.runAsync(
+        "INSERT OR REPLACE INTO user_meta (key, value) VALUES ('last_review_date', ?);",
+        [todayStr]
+    );
+    await db.runAsync(
+        "INSERT OR REPLACE INTO user_meta (key, value) VALUES ('current_streak', ?);",
+        [String(currentStreak)]
+    );
+}
+
+// --- SESSION REFLECTION JOURNAL ---
+export async function saveSessionJournal(
+    cardsReviewed: number,
+    accuracy: number,
+    reflectionText: string
+): Promise<void> {
+    const db = await getReadyDatabase();
+    const now = new Date().toISOString();
+    const sessionDate = now.split('T')[0];
+
+    await db.runAsync(
+        `INSERT INTO session_journal (session_date, cards_reviewed, accuracy, reflection_text, created_at) VALUES (?, ?, ?, ?, ?);`,
+        [sessionDate, cardsReviewed, accuracy, reflectionText, now]
+    );
 }
 
 // --- RESET / MAINTENANCE HELPERS ---
