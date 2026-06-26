@@ -439,7 +439,7 @@ export default function AddScreen({ isFocused }: { isFocused?: boolean }) {
 
                 <Modal visible={isModalVisible} transparent animationType="slide" onRequestClose={closeCustomDeckModal}>
                     <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                         style={styles.modalOverlay}
                     >
                         <View style={styles.modalBox}>

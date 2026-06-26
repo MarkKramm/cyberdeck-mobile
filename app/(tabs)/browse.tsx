@@ -737,7 +737,7 @@ export default function BrowseScreen({ isFocused }: { isFocused?: boolean }) {
       </Modal>
 
       <Modal visible={isEditingDeck} transparent animationType="slide" onRequestClose={() => setIsEditingDeck(false)}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalOverlay}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Edit Deck</Text>
 
