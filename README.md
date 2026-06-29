@@ -78,7 +78,7 @@
 
 ## 📁 Project Structure
 
-
+```text
 cyberdeck-mobile/
 ├── app/
 │   ├── _layout.tsx          # Tab navigation (PagerView)
@@ -93,7 +93,7 @@ cyberdeck-mobile/
 ├── app.json                 # Expo configuration
 ├── package.json             # Dependencies
 └── tsconfig.json            # TypeScript configuration
-
+```
 
 
 ---
