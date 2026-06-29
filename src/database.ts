@@ -24,6 +24,8 @@ export type DbCard = {
     review_count: number;
     lapse_count: number;
     ease_factor?: number;
+    suspended?: number;
+    consecutive_failures?: number; // NEW: tracks failed-in-a-row count
     created_at: string;
     updated_at: string;
     deck_name?: string;
@@ -127,6 +129,7 @@ export function initializeDatabase(): Promise<void> {
                 lapse_count INTEGER DEFAULT 0,
                 ease_factor REAL DEFAULT 2.5,
                 suspended INTEGER DEFAULT 0,
+                consecutive_failures INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
@@ -229,6 +232,11 @@ export function initializeDatabase(): Promise<void> {
             await db.execAsync(`ALTER TABLE cards ADD COLUMN suspended INTEGER DEFAULT 0;`);
         } catch (e) {
             console.log("Migration: suspended column already exists or other error", e);
+        }
+        try {
+            await db.execAsync(`ALTER TABLE cards ADD COLUMN consecutive_failures INTEGER DEFAULT 0;`);
+        } catch (e) {
+            console.log("Migration: consecutive_failures column already exists or other error", e);
         }
 
         // --- SEED SELECTION SAFEGUARD ---
@@ -408,17 +416,11 @@ export async function getDueCards(
         JOIN decks d ON c.deck_id = d.id
     `;
 
-const conditions: string[] = ['c.suspended = 0'];
+    const conditions: string[] = ['c.suspended = 0'];
     const params: any[] = [];
 
     // If Re-View is false, strictly apply spaced repetition due-date constraints.
-if (!isReViewMode) {
-        // DATE() cast on both sides makes this comparison format-safe.
-        // getMidnightDue always produces ISO 8601 (YYYY-MM-DDTHH:MM:SS.sssZ), and
-        // SQLite string comparison works correctly for that format. The DATE() cast
-        // is a safeguard against any card whose due_at was written in a different
-        // format (e.g. a very old backup or a third-party import) — without the cast,
-        // that card would be silently skipped forever.
+    if (!isReViewMode) {
         conditions.push('(c.due_at IS NULL OR DATE(c.due_at) <= DATE(?))');
         params.push(todayMidnight);
     }
@@ -485,15 +487,25 @@ export async function rateCard(id: number, decision: 'again' | 'hard' | 'good' |
     if (!card) return;
 
     const newDifficulty = decision;
-     const shouldIncrementLapse = decision === 'again';
-     const newLapseCount = shouldIncrementLapse ? card.lapse_count + 1 : card.lapse_count;
-     const newSuspendedStatus = newLapseCount >= 5 ? 1 : 0;
+    const shouldIncrementLapse = decision === 'again';
 
-     let currentEaseFactor = card.ease_factor ?? 2.5; // Handle null ease_factor with default
-     let nextInterval: number; // saved to interval_days (the springboard)
-     let daysUntilDue: number; // passed to getMidnightDue (when you actually see it)
+    // Track consecutive failures
+    let newConsecutiveFailures = 0;
+    if (decision === 'again') {
+        newConsecutiveFailures = (card.consecutive_failures || 0) + 1;
+    } else {
+        // Any success (hard, good, easy) resets the consecutive failure count
+        newConsecutiveFailures = 0;
+    }
 
-     if (decision === 'again') {
+    const newLapseCount = shouldIncrementLapse ? card.lapse_count + 1 : card.lapse_count;
+    const newSuspendedStatus = newConsecutiveFailures >= 5 ? 1 : 0;
+
+    let currentEaseFactor = card.ease_factor ?? 2.5; // Handle null ease_factor with default
+    let nextInterval: number; // saved to interval_days (the springboard)
+    let daysUntilDue: number; // passed to getMidnightDue (when you actually see it)
+
+    if (decision === 'again') {
         // Decrease ease_factor by 0.20, cap between 1.3 and 3.0
         currentEaseFactor = Math.max(1.3, currentEaseFactor - 0.20);
 
@@ -535,9 +547,10 @@ export async function rateCard(id: number, decision: 'again' | 'hard' | 'good' |
              lapse_count = ?,
              ease_factor = ?,
              suspended = ?,
+             consecutive_failures = ?,
              updated_at = ? 
          WHERE id = ?;`,
-        [newDifficulty, nextDueStr, nextInterval, newLapseCount, currentEaseFactor, newSuspendedStatus, tsStr, id]
+        [newDifficulty, nextDueStr, nextInterval, newLapseCount, currentEaseFactor, newSuspendedStatus, newConsecutiveFailures, tsStr, id]
     );
 
     await logReviewHistory(id, 'srs', decision);
@@ -598,7 +611,6 @@ export async function getStreak(): Promise<number> {
     return Number(row?.value ?? 0);
 }
 
-
 // --- SESSION REFLECTION JOURNAL ---
 export async function saveSessionJournal(
     cardsReviewed: number,
@@ -631,6 +643,7 @@ export async function resetSrsStats(): Promise<void> {
                  interval_days = 0,
                  review_count = 0,
                  lapse_count = 0,
+                 consecutive_failures = 0,
                  updated_at = ?;`,
             [todayMidnight, now]
         );

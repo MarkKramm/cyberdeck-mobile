@@ -1,50 +1,133 @@
-# Welcome to your Expo app 👋
+# 🧠 CYBERDECK
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+> *Your personal cybersecurity flashcard companion — built for retention, designed for focus.*
 
-## Get started
+[![Expo](https://img.shields.io/badge/Expo-54.0.34-000020?style=flat-square&logo=expo)](https://expo.dev)
+[![React Native](https://img.shields.io/badge/React_Native-0.81.5-61DAFB?style=flat-square&logo=react)](https://reactnative.dev)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-3178C6?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
+[![SQLite](https://img.shields.io/badge/SQLite-Expo_SQLite-003B57?style=flat-square&logo=sqlite)](https://docs.expo.dev/versions/latest/sdk/sqlite/)
+[![Status](https://img.shields.io/badge/Status-Beta-10B981?style=flat-square)]()
+[![License](https://img.shields.io/badge/License-MIT-EF4444?style=flat-square)]()
 
-1. Install dependencies
+---
 
-   ```bash
-   npm install
-   ```
+## 📖 About
 
-2. Start the app
+**CYBERDECK** is a personal, offline-first flashcard app built specifically for studying **cybersecurity**. It uses a custom **Spaced Repetition System (SRS)** to help you retain technical concepts, commands, tools, and methodologies — all while keeping your data private and local on your device.
 
-   ```bash
-   npx expo start
-   ```
+> Built by a cybersecurity learner, for cybersecurity learners. 🛡️
 
-In the output, you'll find options to open the app in a
+---
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## ✨ Features
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
+### 🧠 SRS Engine (Custom SM-2)
+- **4 Ratings:** Again / Hard / Good / Easy
+- **Dynamic Ease Factor:** Each card has its own ease factor (default 2.5) that adjusts based on your performance
+- **Consecutive Failures Tracking:** Auto‑suspends cards after 5 failures in a row — protects your mental energy
+- **365‑Day Interval Cap:** No card goes beyond one year (cybersecurity changes fast!)
+- **Midnight Cutoff:** Cards become due at 12am, not mid‑day — consistent scheduling
 
-## Get a fresh project
+### 🎯 Review & Study
+- **Re‑View Mode:** Practice any card without affecting your SRS schedule
+- **Deck Filtering:** Focus on specific decks during review sessions
+- **Flip Animation:** Smooth, satisfying card flips
 
-When you're ready, run:
+### 📊 Home Dashboard
+- **Due Now** count with color‑coded status
+- **New Cards** waiting to be learned
+- **Due by Deck** breakdown
+- **🔥 Daily Streak** tracker — stay consistent
+- **Wisdom Quote** — daily motivation
+- **Latest Win** — celebrate your victories
+
+### ✍️ Card Management
+- **Forge Card** (`add.tsx`) — manual card creation with deck selector
+- **Browse Vault** (`browse.tsx`) — search, edit, delete, and batch move/delete cards
+- **10 Card Types** — Q&A, Definition, ELI5, Abbreviation, Command, Difference, Port, Scenario, What to Check, Interview
+
+### 📝 Mistake & Win Journal
+- **Mistake Bank** — log confusing concepts, mark them resolved
+- **Win Log** — capture milestones and small victories
+
+### 💾 Backup & Restore
+- **Export Full Backup** — save all decks, cards, review logs, mistakes, and wins as JSON
+- **Restore Backup** — full disaster recovery
+- **Merge Import** — add AI‑generated decks/cards without wiping your current data
+- **Copy Import Template** — pre‑filled JSON template for ChatGPT/Claude
+
+### 🔒 Privacy
+- **100% offline** — all data stored locally via SQLite
+- **No cloud sync** — your data stays on your device
+
+---
+
+## 🏗️ Tech Stack
+
+| Layer | Technology |
+|-------|------------|
+| **Framework** | Expo (React Native) |
+| **Language** | TypeScript |
+| **Database** | expo-sqlite |
+| **Navigation** | react-native-pager-view |
+| **UI/Styling** | React Native StyleSheet, SafeAreaView |
+| **File Handling** | expo-document-picker, expo-file-system |
+| **Icons** | @expo/vector-icons (Ionicons) |
+
+---
+
+## 📁 Project Structure
+
+
+cyberdeck-mobile/
+├── app/
+│   ├── _layout.tsx          # Tab navigation (PagerView)
+│   ├── index.tsx            # Home dashboard
+│   ├── review.tsx           # Flashcard review screen
+│   ├── add.tsx              # Create new cards
+│   ├── browse.tsx           # Search, edit, batch manage cards
+│   └── more.tsx             # Backup, mistakes, wins
+├── src/
+│   └── database.ts          # All SQLite logic, SRS engine, migrations
+├── assets/                  # Icons, splash screen
+├── app.json                 # Expo configuration
+├── package.json             # Dependencies
+└── tsconfig.json            # TypeScript configuration
+
+
+
+---
+
+## 📊 Database Tables
+
+| Table | Purpose |
+|-------|---------|
+| `decks` | Study decks with name, description, color |
+| `cards` | Flashcards with front, back, card_type, tags, notes |
+| `review_logs` | History of all SRS and Re‑View reviews |
+| `mistakes` | Mistake journal entries |
+| `wins` | Win log entries |
+| `user_meta` | Streak tracking (last_review_date, current_streak) |
+| `app_metadata` | Schema version tracking |
+| `session_journal` | Optional session reflection (future use) |
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- Node.js (v20+)
+- Expo CLI
+
+### Installation
 
 ```bash
-npm run reset-project
-```
+# Clone the repository
+git clone https://github.com/yourusername/cyberdeck-mobile.git
+cd cyberdeck-mobile
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+# Install dependencies
+npm install
 
-## Learn more
-
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+# Start the app
+npx expo start
