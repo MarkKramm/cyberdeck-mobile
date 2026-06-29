@@ -131,3 +131,11 @@ npm install
 
 # Start the app
 npx expo start
+git clone https://github.com/MarkKramm/cyberdeck-mobile.git
+cd cyberdeck-mobile
+
+# Install dependencies
+npm install
+
+# Start the app
+npx expo start
