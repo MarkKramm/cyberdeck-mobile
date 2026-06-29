@@ -123,7 +123,7 @@ cyberdeck-mobile/
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/cyberdeck-mobile.git
+git clone https://github.com/MarkKramm/cyberdeck-mobile.git
 cd cyberdeck-mobile
 
 # Install dependencies
